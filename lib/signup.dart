@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'facebook_auth.dart';
 import 'google_auth.dart';
 import 'household.dart';
 
@@ -148,8 +149,15 @@ class _SignUpPageState extends State<SignUpPage> {
   // FACEBOOK SIGN-IN
   // ===========================================================
   Future<void> _signUpWithFacebook() async {
+    // The web SDK has to be loaded and given the app id before any of
+    // this works; off the web this returns immediately.
+    if (!FacebookAuthGate.isAvailable) {
+      _showError("Facebook sign-in isn't set up for web yet — use email or Google here.");
+      return;
+    }
     setState(() => _isLoading = true);
     try {
+      await FacebookAuthGate.instance.ensureInitialized();
       final result = await FacebookAuth.instance.login();
 
       if (result.status == LoginStatus.success) {
@@ -219,10 +227,13 @@ class _SignUpPageState extends State<SignUpPage> {
                 Container(
                   width: 70,
                   height: 70,
+                  // Solid white: the mark is teal and would otherwise sit
+                  // teal-on-teal against this header.
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(18),
                   ),
+                  padding: const EdgeInsets.all(9),
                   child: Image.asset("assets/logo.png"),
                 ),
                 const SizedBox(height: 6),
@@ -390,64 +401,93 @@ class _SignUpPageState extends State<SignUpPage> {
                       const SizedBox(height: 22),
 
                       // GOOGLE + FACEBOOK
-                      Row(
-                        children: [
-                          Expanded(
-                            child: kIsWeb
-                                ? SizedBox(
-                                    height: 50,
-                                    child: GoogleAuthGate.instance.button != null
-                                        ? GoogleAuthGate.instance.button!
-                                        : const Center(
-                                            child: SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: CircularProgressIndicator(strokeWidth: 2),
+                      //
+                      // Both buttons are pinned to the same 240x40 box.
+                      // Google's rendered button maxes out at 400x40 and
+                      // can't be told to fill a slot, so matching it means
+                      // sizing ours to it rather than the other way round.
+                      // Centred explicitly: the Wrap shrink-wraps to
+                      // its children, and the form Column around it is
+                      // start-aligned, so without this the pair sits
+                      // flush left instead of under the Log In button.
+                      Center(
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 14,
+                          runSpacing: 12,
+                          children: [
+
+                            // GOOGLE
+                            // Web requires Google's own rendered button (its
+                            // SDK does not allow a custom button to trigger
+                            // sign-in). Android/iOS keep the custom button.
+                            SizedBox(
+                              width: 240,
+                              height: 40,
+                              child: kIsWeb
+                                  ? (GoogleAuthGate.instance.button != null
+                                      ? Center(child: GoogleAuthGate.instance.button!)
+                                      : const Center(
+                                          child: SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          ),
+                                        ))
+                                  : OutlinedButton(
+                                      onPressed: _isLoading ? null : _signUpWithGoogle,
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: const Color(0xFF1F2937),
+                                        side: const BorderSide(color: Color(0xFFE5E7EB)),
+                                        padding: EdgeInsets.zero,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(20),
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            "G",
+                                            style: TextStyle(
+                                              color: Colors.red,
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.bold,
                                             ),
                                           ),
-                                  )
-                                : OutlinedButton(
-                                    onPressed: _isLoading ? null : _signUpWithGoogle,
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: const Color(0xFF1F2937),
-                                      side: const BorderSide(color: Color(0xFFE5E7EB)),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-                                      padding: const EdgeInsets.symmetric(vertical: 15),
+                                          SizedBox(width: 8),
+                                          Text("Google", style: TextStyle(fontSize: 14)),
+                                        ],
+                                      ),
                                     ),
-                                    child: const Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          "G",
-                                          style: TextStyle(color: Colors.red, fontSize: 20, fontWeight: FontWeight.bold),
-                                        ),
-                                        SizedBox(width: 10),
-                                        Text("Google", style: TextStyle(fontSize: 15)),
-                                      ],
-                                    ),
+                            ),
+
+                            // FACEBOOK
+                            SizedBox(
+                              width: 240,
+                              height: 40,
+                              child: OutlinedButton(
+                                onPressed: _isLoading ? null : _signUpWithFacebook,
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF1F2937),
+                                  side: const BorderSide(color: Color(0xFFE5E7EB)),
+                                  padding: EdgeInsets.zero,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20),
                                   ),
-                          ),
-                          const SizedBox(width: 15),
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: _isLoading ? null : _signUpWithFacebook,
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF1F2937),
-                                side: const BorderSide(color: Color(0xFFE5E7EB)),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-                                padding: const EdgeInsets.symmetric(vertical: 15),
-                              ),
-                              child: const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.facebook, color: Colors.blue, size: 20),
-                                  SizedBox(width: 8),
-                                  Text("Facebook", style: TextStyle(fontSize: 15)),
-                                ],
+                                ),
+                                child: const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.facebook, color: Colors.blue, size: 19),
+                                    SizedBox(width: 8),
+                                    Text("Facebook", style: TextStyle(fontSize: 14)),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
 
                       const SizedBox(height: 26),

@@ -47,7 +47,28 @@ class GoogleAuthGate {
           _signInEvents.add(event.user);
         }
       });
-      button = web_gsi.renderButton();
+      // Styled to sit next to the Facebook button rather than next to
+      // nothing: pill + outline + large matches that button's 25px
+      // radius, grey border and ~50px height.
+      //
+      // locale is pinned because the rendered button otherwise follows
+      // the browser's language — which is why it read "Mag-sign in sa
+      // Google" beside an English "Facebook".
+      //
+      // Google caps this button at 400x40 and gives no way to stretch
+      // it, so the Facebook button is sized to match this one rather
+      // than the other way round. 240 is what both are pinned to.
+      button = web_gsi.renderButton(
+        configuration: web_gsi.GSIButtonConfiguration(
+          theme: web_gsi.GSIButtonTheme.outline,
+          size: web_gsi.GSIButtonSize.large,
+          shape: web_gsi.GSIButtonShape.pill,
+          text: web_gsi.GSIButtonText.continueWith,
+          logoAlignment: web_gsi.GSIButtonLogoAlignment.center,
+          minimumWidth: 240,
+          locale: 'en',
+        ),
+      );
     }
 
     ready = true;
