@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "768506792119",
+    "firebase_url": "https://homesync-386ee-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "homesync-386ee",
+    "storage_bucket": "homesync-386ee.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:768506792119:android:27cc376ff47776c718a532",
+        "android_client_info": {
+          "package_name": "com.example.demo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCJRolY8fVDnnYI3FhYDVtoomW7DkZJPzE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

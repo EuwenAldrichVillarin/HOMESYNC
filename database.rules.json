@@ -1,0 +1,180 @@
+{
+  "rules": {
+    "devices": {
+      ".read": "auth != null",
+
+      "$deviceId": {
+        "ownerId": {
+          ".write": "auth != null && (!data.exists() || data.val() == auth.uid)",
+          ".validate": "newData.isString()"
+        },
+
+        "info": {
+          ".write": "auth != null && (!root.child('devices').child($deviceId).child('ownerId').exists() || root.child('devices').child($deviceId).child('ownerId').val() == auth.uid)",
+          "name": { ".validate": "newData.isString() && newData.val().length <= 60" },
+          "room": { ".validate": "newData.isString() && newData.val().length <= 60" },
+          "type": { ".validate": "newData.isString()" }
+        },
+
+        "limits": {
+          ".write": "auth != null && root.child('devices').child($deviceId).child('ownerId').val() == auth.uid",
+          "maxWatts":    { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 5000" },
+          "maxDailyKwh": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 500" },
+          "$other": { ".validate": false }
+        },
+
+        "command": {
+          ".write": "auth != null && (root.child('devices').child($deviceId).child('ownerId').val() == auth.uid || (root.child('devices').child($deviceId).child('ownerId').isString() && root.child('users').child(root.child('devices').child($deviceId).child('ownerId').val()).child('members').child(auth.uid).child('permissions').child('control').val() == true))",
+          "relay": { ".validate": "newData.isBoolean()" }
+        },
+
+        "schedule": {
+          ".write": "auth != null && (root.child('devices').child($deviceId).child('ownerId').val() == auth.uid || (root.child('devices').child($deviceId).child('ownerId').isString() && root.child('users').child(root.child('devices').child($deviceId).child('ownerId').val()).child('members').child(auth.uid).child('permissions').child('schedule').val() == true))",
+          "enabled": { ".validate": "newData.isBoolean()" },
+          "startMinutes": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 1440" },
+          "endMinutes": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 1440" },
+          "days": {
+            "mon": { ".validate": "newData.isBoolean()" },
+            "tue": { ".validate": "newData.isBoolean()" },
+            "wed": { ".validate": "newData.isBoolean()" },
+            "thu": { ".validate": "newData.isBoolean()" },
+            "fri": { ".validate": "newData.isBoolean()" },
+            "sat": { ".validate": "newData.isBoolean()" },
+            "sun": { ".validate": "newData.isBoolean()" }
+          }
+        },
+
+        "state": {
+          ".write": "auth != null && auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3'",
+          "relay": { ".validate": "newData.isBoolean()" }
+        },
+
+        "telemetry": {
+          ".write": "auth != null && auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3'",
+          "power":     { ".validate": "newData.isNumber()" },
+          "voltage":   { ".validate": "newData.isNumber()" },
+          "current":   { ".validate": "newData.isNumber()" },
+          "energy":    { ".validate": "newData.isNumber()" },
+          "frequency": { ".validate": "newData.isNumber()" },
+          "pf":        { ".validate": "newData.isNumber()" }
+        },
+
+        "history": {
+          ".write": "auth != null && auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3'",
+          "$date": { ".validate": "newData.isNumber()" }
+        }
+      }
+    },
+
+    "activity": {
+      "$householdUid": {
+        ".read": "auth != null && (auth.uid == $householdUid || root.child('users').child($householdUid).child('members').child(auth.uid).exists())",
+        ".indexOn": ["at"],
+
+        "$entryId": {
+          ".write": "auth != null && ((!data.exists() && newData.exists() && (auth.uid == $householdUid || root.child('users').child($householdUid).child('members').child(auth.uid).exists())) || (auth.uid == $householdUid && !newData.exists()))",
+
+          "at":        { ".validate": "newData.isNumber()" },
+          "actorUid":  { ".validate": "newData.isString() && newData.val() == auth.uid" },
+          "actorName": { ".validate": "newData.isString() && newData.val().length <= 60" },
+          "action":    { ".validate": "newData.isString() && newData.val().length <= 40" },
+          "target":    { ".validate": "newData.isString() && newData.val().length <= 80" },
+          "detail":    { ".validate": "newData.isString() && newData.val().length <= 120" },
+          "$other":    { ".validate": false }
+        }
+      }
+    },
+
+    "alerts": {
+      "$householdUid": {
+        ".read": "auth != null && (auth.uid == $householdUid || root.child('users').child($householdUid).child('members').child(auth.uid).exists())",
+        ".indexOn": ["at"],
+
+        "$alertId": {
+          ".write": "auth != null && !data.exists() && newData.exists() && (auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3' || auth.uid == $householdUid || root.child('users').child($householdUid).child('members').child(auth.uid).exists())",
+
+          "at":         { ".validate": "newData.isNumber()" },
+          "deviceId":   { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "deviceName": { ".validate": "newData.isString() && newData.val().length <= 60" },
+          "kind":       { ".validate": "newData.val() == 'power' || newData.val() == 'daily'" },
+          "value":      { ".validate": "newData.isNumber()" },
+          "limit":      { ".validate": "newData.isNumber()" },
+
+          "acknowledged": {
+            ".write": "auth != null && (auth.uid == $householdUid || root.child('users').child($householdUid).child('members').child(auth.uid).exists())",
+            ".validate": "newData.isBoolean()"
+          },
+
+          "$other": { ".validate": false }
+        }
+      }
+    },
+
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid",
+
+        "householdAdminUid": { ".validate": "newData.isString()" },
+
+        "profile": {
+          ".read": "auth != null && (auth.uid == $uid || root.child('users').child($uid).child('members').child(auth.uid).exists() || root.child('users').child($uid).child('householdAdminUid').val() == auth.uid)",
+          "name":  { ".validate": "newData.isString() && newData.val().length <= 60" },
+          "email": { ".validate": "newData.isString() && newData.val().length <= 254" },
+          "role":  { ".validate": "newData.val() == 'admin' || newData.val() == 'member'" },
+          "photo": { ".validate": "newData.isString() && newData.val().length <= 200000" }
+        },
+
+        "appliances": {
+          ".read": "auth != null && (auth.uid == $uid || root.child('users').child($uid).child('members').child(auth.uid).exists())"
+        },
+
+        "schedulesReset": { ".validate": "newData.isNumber()" },
+
+        "schedules": {
+          ".read": "auth != null && (auth.uid == $uid || root.child('users').child($uid).child('members').child(auth.uid).exists())",
+          ".write": "auth != null && (auth.uid == $uid || root.child('users').child($uid).child('members').child(auth.uid).child('permissions').child('schedule').val() == true)",
+
+          "$scheduleId": {
+            "name":         { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "enabled":      { ".validate": "newData.isBoolean()" },
+            "startMinutes": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 1440" },
+            "endMinutes":   { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 1440" },
+            "days": {
+              "mon": { ".validate": "newData.isBoolean()" },
+              "tue": { ".validate": "newData.isBoolean()" },
+              "wed": { ".validate": "newData.isBoolean()" },
+              "thu": { ".validate": "newData.isBoolean()" },
+              "fri": { ".validate": "newData.isBoolean()" },
+              "sat": { ".validate": "newData.isBoolean()" },
+              "sun": { ".validate": "newData.isBoolean()" }
+            },
+            "devices": {
+              "$deviceId": { ".validate": "newData.isBoolean()" }
+            },
+            "$other": { ".validate": false }
+          }
+        },
+
+        "settings": {
+          ".read": "auth != null && (auth.uid == $uid || root.child('users').child($uid).child('members').child(auth.uid).exists())"
+        },
+
+        "members": {
+          "$memberUid": {
+            ".read": "auth != null && (auth.uid == $uid || auth.uid == $memberUid)",
+            "name":      { ".validate": "newData.isString() && newData.val().length <= 60" },
+            "email":     { ".validate": "newData.isString() && newData.val().length <= 254" },
+            "createdAt": { ".validate": "newData.isNumber()" },
+            "permissions": {
+              "control":  { ".validate": "newData.isBoolean()" },
+              "schedule": { ".validate": "newData.isBoolean()" },
+              "reports":  { ".validate": "newData.isBoolean()" }
+            },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    }
+  }
+}
