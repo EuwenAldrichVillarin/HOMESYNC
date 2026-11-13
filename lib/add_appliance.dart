@@ -8,8 +8,8 @@ import 'activity.dart';
 
 // ===================================================================
 // APPLIANCE TYPE OPTIONS
-// Each has an icon shown in the type picker grid. Extend this list if
-// you add new appliance categories later.
+// Each has an icon shown in the type picker grid. Extend this list (and
+// kApplianceBrands below) if you add new appliance categories later.
 // ===================================================================
 class ApplianceType {
   final String label;
@@ -26,7 +26,66 @@ const List<ApplianceType> kApplianceTypes = [
   ApplianceType("Washer", Icons.local_laundry_service),
   ApplianceType("Fan", Icons.mode_fan_off),
   ApplianceType("Heater", Icons.thermostat),
-  ApplianceType("Other", Icons.power),
+];
+
+/// Value used in the Brand and Room dropdowns for "not in the list".
+/// Picking it shows a text box so the user can type their own.
+const String kOtherOption = "Other";
+
+// ===================================================================
+// BRANDS PER APPLIANCE TYPE
+// The Brand dropdown only lists the brands for the selected type, so a
+// user can't pair e.g. "Daikin" with a TV. Anything missing is covered
+// by the "Other" option at the bottom of the dropdown.
+// ===================================================================
+const Map<String, List<String>> kApplianceBrands = {
+  "Aircon": [
+    "Carrier", "Koppel", "Condura", "Kolin", "LG", "Samsung", "Panasonic",
+    "Daikin", "Midea", "TCL", "Hitachi", "Fujidenzo", "American Home",
+  ],
+  "Fridge": [
+    "Samsung", "LG", "Panasonic", "Sharp", "Condura", "Whirlpool",
+    "Fujidenzo", "Hisense", "Midea", "Haier", "Electrolux", "American Home",
+  ],
+  "TV": [
+    "Samsung", "LG", "Sony", "TCL", "Hisense", "Sharp", "Panasonic",
+    "Xiaomi", "Skyworth", "Devant", "Coocaa",
+  ],
+  "Light": [
+    "Philips", "Firefly", "Omni", "Akari", "Osram", "GE", "Xiaomi",
+    "TP-Link Tapo",
+  ],
+  "Washer": [
+    "LG", "Samsung", "Panasonic", "Electrolux", "Whirlpool", "Sharp",
+    "Fujidenzo", "Haier", "Hanabishi", "Midea", "American Home",
+  ],
+  "Fan": [
+    "Asahi", "Hanabishi", "Standard", "Dowell", "Kolin", "Union",
+    "Imarflex", "Xiaomi", "Panasonic", "Iwata", "Camel",
+  ],
+  "Heater": [
+    "Ariston", "Panasonic", "Joven", "Rheem", "Centon", "Alpha",
+    "Electrolux", "Imarflex",
+  ],
+};
+
+// ===================================================================
+// ROOMS
+// Fixed list for the Room dropdown; "Other" lets the user type a room
+// that isn't here.
+// ===================================================================
+const List<String> kRooms = [
+  "Living Room",
+  "Kitchen",
+  "Dining Room",
+  "Bedroom",
+  "Master Bedroom",
+  "Kids' Room",
+  "Bathroom",
+  "Laundry Area",
+  "Home Office",
+  "Garage",
+  "Outdoor / Garden",
 ];
 
 class AddAppliancePage extends StatefulWidget {
@@ -45,11 +104,16 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
 
   final _deviceIdController = TextEditingController();
   final _nameController = TextEditingController();
-  final _roomController = TextEditingController();
+  final _customBrandController = TextEditingController();
+  final _customRoomController = TextEditingController();
   final _maxWattsController = TextEditingController();
   final _maxDailyKwhController = TextEditingController();
 
   ApplianceType? _selectedType;
+  // Dropdown selections. Either can be kOtherOption, in which case the
+  // real value is whatever was typed in the matching custom controller.
+  String? _selectedBrand;
+  String? _selectedRoom;
   bool _isSaving = false;
   bool _isRemoving = false;
   bool _isLoadingExisting = false;
@@ -85,17 +149,64 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
       final info = snapshot.value;
       if (info is Map) {
         _nameController.text = (info['name'] as String?) ?? '';
-        _roomController.text = (info['room'] as String?) ?? '';
         final typeLabel = info['type'] as String?;
         _selectedType = kApplianceTypes.cast<ApplianceType?>().firstWhere(
               (t) => t?.label == typeLabel,
               orElse: () => null,
             );
+
+        // A saved value that isn't in the list (typed via "Other", or
+        // from before these were dropdowns) reopens as "Other" with the
+        // text filled in, so nothing the user entered is lost.
+        final brand = ((info['brand'] as String?) ?? '').trim();
+        if (brand.isNotEmpty && _selectedType != null) {
+          if (_brandsFor(_selectedType).contains(brand)) {
+            _selectedBrand = brand;
+          } else {
+            _selectedBrand = kOtherOption;
+            _customBrandController.text = brand;
+          }
+        }
+
+        final room = ((info['room'] as String?) ?? '').trim();
+        if (room.isNotEmpty) {
+          if (kRooms.contains(room)) {
+            _selectedRoom = room;
+          } else {
+            _selectedRoom = kOtherOption;
+            _customRoomController.text = room;
+          }
+        }
       }
     } finally {
       if (mounted) setState(() => _isLoadingExisting = false);
     }
   }
+
+  List<String> _brandsFor(ApplianceType? type) =>
+      type == null ? const [] : (kApplianceBrands[type.label] ?? const []);
+
+  /// Picking a type. A brand chosen for the previous type may not make
+  /// the new one, so changing the type clears the brand and the user
+  /// picks again.
+  void _selectType(ApplianceType type) {
+    setState(() {
+      if (_selectedType != type) {
+        _selectedBrand = null;
+        _customBrandController.clear();
+      }
+      _selectedType = type;
+      _applyDefaultWattsFor(type);
+    });
+  }
+
+  String get _brandValue => _selectedBrand == kOtherOption
+      ? _customBrandController.text.trim()
+      : (_selectedBrand ?? '');
+
+  String get _roomValue => _selectedRoom == kOtherOption
+      ? _customRoomController.text.trim()
+      : (_selectedRoom ?? '');
 
   /// Pre-fills the power ceiling when a type is chosen on a new
   /// appliance. A limit nobody sets is a limit that never fires, so the
@@ -121,7 +232,8 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
   void dispose() {
     _deviceIdController.dispose();
     _nameController.dispose();
-    _roomController.dispose();
+    _customBrandController.dispose();
+    _customRoomController.dispose();
     _maxWattsController.dispose();
     _maxDailyKwhController.dispose();
     super.dispose();
@@ -142,13 +254,15 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
   // SAVE — claims the device for the current user in Realtime Database
   // ===============================================================
   Future<void> _handleSave() async {
-    if (!_formKey.currentState!.validate()) return;
+    // Checked before the form so the message isn't buried under the
+    // Brand dropdown's own "pick a type first" error.
     if (_selectedType == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please select an appliance type")),
       );
       return;
     }
+    if (!_formKey.currentState!.validate()) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -173,7 +287,8 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
     // duplicate entries (e.g. "a1b2c3" vs "A1B2C3").
     final deviceId = _deviceIdController.text.trim().toUpperCase();
     final name = _nameController.text.trim();
-    final room = _roomController.text.trim();
+    final room = _roomValue;
+    final brand = _brandValue;
 
     setState(() => _isSaving = true);
 
@@ -190,6 +305,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
             'name': name,
             'room': room,
             'type': _selectedType!.label,
+            'brand': brand,
           },
           // null clears a limit, which is what an emptied box means.
           'devices/$deviceId/limits/maxWatts': maxWatts,
@@ -235,6 +351,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
           'name': name,
           'room': room,
           'type': _selectedType!.label,
+          'brand': brand,
         },
         'devices/$deviceId/limits/maxWatts': maxWatts,
         'devices/$deviceId/limits/maxDailyKwh': maxDailyKwh,
@@ -503,6 +620,185 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                       const SizedBox(height: 26),
 
                       // =================================================
+                      // APPLIANCE TYPE
+                      // =================================================
+                      const Text(
+                        "Appliance Type",
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF4B5563),
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      GridView.count(
+                        crossAxisCount: 4,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 0.85,
+                        children: kApplianceTypes.map((type) {
+                          final selected = _selectedType == type;
+
+                          return GestureDetector(
+                            onTap: _isBusy ? null : () => _selectType(type),
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 56,
+                                  height: 56,
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? const Color(0xFF0F766E)
+                                        : Colors.white,
+                                    borderRadius:
+                                        BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: selected
+                                          ? const Color(0xFF0F766E)
+                                          : const Color(0xFFE2E8F0),
+                                      width: selected ? 0 : 1,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    type.icon,
+                                    color: selected
+                                        ? Colors.white
+                                        : const Color(0xFF64748B),
+                                    size: 24,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  type.label,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: selected
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    color: selected
+                                        ? const Color(0xFF0F766E)
+                                        : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+
+                      const SizedBox(height: 26),
+
+                      // =================================================
+                      // BRAND (only brands that make the selected type)
+                      // =================================================
+                      _fieldLabel("Brand"),
+
+                      const SizedBox(height: 8),
+
+                      DropdownButtonFormField<String>(
+                        // Rebuilt when the type changes so the cleared
+                        // brand actually shows as cleared.
+                        key: ValueKey('brand_${_selectedType?.label}'),
+                        initialValue: _selectedBrand,
+                        isExpanded: true,
+                        borderRadius: BorderRadius.circular(16),
+                        dropdownColor: Colors.white,
+                        decoration: _fieldDecoration(
+                          _selectedType == null ? "Select an appliance type first" : "Select brand",
+                        ),
+                        items: _selectedType == null
+                            ? null
+                            : [
+                                for (final brand in _brandsFor(_selectedType))
+                                  DropdownMenuItem(value: brand, child: Text(brand)),
+                                const DropdownMenuItem(
+                                  value: kOtherOption,
+                                  child: Text("Other (type brand)"),
+                                ),
+                              ],
+                        onChanged: _isBusy
+                            ? null
+                            : (value) => setState(() {
+                                  _selectedBrand = value;
+                                  if (value != kOtherOption) _customBrandController.clear();
+                                }),
+                        validator: (value) {
+                          if (_selectedType == null) return "Select an appliance type first";
+                          if (value == null) return "Select a brand";
+                          return null;
+                        },
+                      ),
+
+                      if (_selectedBrand == kOtherOption) ...[
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: _customBrandController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: _fieldDecoration("Enter the brand"),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return "Enter the brand of this appliance";
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+
+                      const SizedBox(height: 26),
+
+                      // =================================================
+                      // ROOM
+                      // =================================================
+                      _fieldLabel("Room"),
+
+                      const SizedBox(height: 8),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedRoom,
+                        isExpanded: true,
+                        borderRadius: BorderRadius.circular(16),
+                        dropdownColor: Colors.white,
+                        decoration: _fieldDecoration("Select room"),
+                        items: [
+                          for (final room in kRooms)
+                            DropdownMenuItem(value: room, child: Text(room)),
+                          const DropdownMenuItem(
+                            value: kOtherOption,
+                            child: Text("Other (type room)"),
+                          ),
+                        ],
+                        onChanged: _isBusy
+                            ? null
+                            : (value) => setState(() {
+                                  _selectedRoom = value;
+                                  if (value != kOtherOption) _customRoomController.clear();
+                                }),
+                        validator: (value) => value == null ? "Select which room this is in" : null,
+                      ),
+
+                      if (_selectedRoom == kOtherOption) ...[
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: _customRoomController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: _fieldDecoration("Enter the room"),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return "Enter which room this is in";
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+
+                      const SizedBox(height: 26),
+
+                      // =================================================
                       // APPLIANCE NAME
                       // =================================================
                       const Text(
@@ -522,33 +818,6 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
                             return "Give this appliance a name";
-                          }
-                          return null;
-                        },
-                      ),
-
-                      const SizedBox(height: 26),
-
-                      // =================================================
-                      // ROOM
-                      // =================================================
-                      const Text(
-                        "Room",
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF4B5563),
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      TextFormField(
-                        controller: _roomController,
-                        decoration: _fieldDecoration("e.g. Living Room"),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return "Enter which room this is in";
                           }
                           return null;
                         },
@@ -605,85 +874,6 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                             ),
                           ),
                         ],
-                      ),
-
-                      const SizedBox(height: 26),
-
-                      // =================================================
-                      // APPLIANCE TYPE
-                      // =================================================
-                      const Text(
-                        "Appliance Type",
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF4B5563),
-                        ),
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      GridView.count(
-                        crossAxisCount: 4,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 0.85,
-                        children: kApplianceTypes.map((type) {
-                          final selected = _selectedType == type;
-
-                          return GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _selectedType = type;
-                                _applyDefaultWattsFor(type);
-                              });
-                            },
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 56,
-                                  height: 56,
-                                  decoration: BoxDecoration(
-                                    color: selected
-                                        ? const Color(0xFF0F766E)
-                                        : Colors.white,
-                                    borderRadius:
-                                        BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: selected
-                                          ? const Color(0xFF0F766E)
-                                          : const Color(0xFFE2E8F0),
-                                      width: selected ? 0 : 1,
-                                    ),
-                                  ),
-                                  child: Icon(
-                                    type.icon,
-                                    color: selected
-                                        ? Colors.white
-                                        : const Color(0xFF64748B),
-                                    size: 24,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  type.label,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: selected
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                    color: selected
-                                        ? const Color(0xFF0F766E)
-                                        : const Color(0xFF64748B),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
                       ),
 
                       const SizedBox(height: 40),
@@ -802,6 +992,17 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
     if (parsed <= 0) return "Must be more than 0";
     if (parsed > max) return "Too high (max ${max.toStringAsFixed(0)} $unit)";
     return null;
+  }
+
+  Widget _fieldLabel(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: Color(0xFF4B5563),
+      ),
+    );
   }
 
   InputDecoration _fieldDecoration(String hint) {
