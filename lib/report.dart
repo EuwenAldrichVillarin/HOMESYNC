@@ -4,10 +4,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 
 import 'household.dart';
+import 'rate_dialog.dart';
 import 'members.dart';
 
 // Fallback used until users/{uid}/settings/pesoPerKwh loads (or if it was
-// never set). Editable from the Home screen's rate button.
+// never set). Editable from the rate button on Home and on this screen.
 const double _kDefaultPesoPerKwh = 11.0;
 
 enum _ReportRange { day, week, month, custom }
@@ -355,27 +356,57 @@ class _ReportPageState extends State<ReportPage> {
                             color: Color(0xFF1F2937),
                           ),
                         ),
-                        InkWell(
-                          borderRadius: BorderRadius.circular(17),
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("Export not wired up yet")),
-                            );
-                          },
-                          child: Container(
-                            width: 34,
-                            height: 34,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFFE5E7EB)),
+                        Row(
+                          children: [
+                            // Same rate editor as Home. Members share the
+                            // admin's rate but can't change it.
+                            if (_session?.canEditRate ?? false) ...[
+                              InkWell(
+                                borderRadius: BorderRadius.circular(17),
+                                onTap: () => showEditRateDialog(context, _session!.householdUid, _pesoPerKwh),
+                                child: Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                                  ),
+                                  child: const Tooltip(
+                                    message: "Edit electricity rate",
+                                    child: Icon(
+                                      Icons.payments_outlined,
+                                      size: 18,
+                                      color: Color(0xFF0F766E),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            InkWell(
+                              borderRadius: BorderRadius.circular(17),
+                              onTap: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text("Export not wired up yet")),
+                                );
+                              },
+                              child: Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                                ),
+                                child: const Icon(
+                                  Icons.file_download_outlined,
+                                  size: 18,
+                                  color: Color(0xFF0F766E),
+                                ),
+                              ),
                             ),
-                            child: const Icon(
-                              Icons.file_download_outlined,
-                              size: 18,
-                              color: Color(0xFF0F766E),
-                            ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
