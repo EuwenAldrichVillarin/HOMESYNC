@@ -62,6 +62,13 @@
         "history": {
           ".write": "auth != null && auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3'",
           "$date": { ".validate": "newData.isNumber()" }
+        },
+
+        "hourly": {
+          ".write": "auth != null && auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3'",
+          "$date": {
+            "$hour": { ".validate": "newData.isNumber()" }
+          }
         }
       }
     },

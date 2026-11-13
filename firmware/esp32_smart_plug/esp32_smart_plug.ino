@@ -23,6 +23,9 @@
     devices/{DEVICE_ID}/history/{date}   number  kWh used on that calendar date (YYYY-MM-DD, local time),
                                                   this device writes it — the app's Report screen reads it
                                                   to build the daily/weekly/monthly usage chart
+    devices/{DEVICE_ID}/hourly/{date}/{HH} number kWh used in that hour of that date (HH = "00".."23",
+                                                  local time), this device writes it — the Report
+                                                  screen's Hour view reads today's 24 values
     devices/{DEVICE_ID}/schedule         map     {enabled, days: {mon..sun}, startMinutes, endMinutes}
     devices/{DEVICE_ID}/limits           map     {maxWatts, maxDailyKwh}  (the app writes, this device reads)
     alerts/{OWNER_UID}/{ALERT_ID}        map     raised here when a limit is exceeded; the id is
@@ -120,6 +123,10 @@ String currentDay;               // "YYYY-MM-DD" this device is currently loggin
 float dayStartEnergy = 0;        // cumulative energy reading at the start of currentDay
 bool dayBaselineReady = false;   // false until dayStartEnergy means something
 
+String currentHourDate;          // "YYYY-MM-DD" of the hour being logged
+int currentHour = -1;            // 0..23, -1 until the first hourly baseline is set
+float hourStartEnergy = 0;       // cumulative energy reading at the start of currentHour
+
 String macToDeviceId() {
   String mac = WiFi.macAddress(); // e.g. "AA:BB:CC:DD:EE:FF"
   mac.replace(":", "");
@@ -158,6 +165,69 @@ void initDailyBaseline(float currentEnergy) {
     dayStartEnergy = currentEnergy - fbdo.floatData();
   } else {
     dayStartEnergy = currentEnergy;
+  }
+}
+
+// Path of one hour's slot, e.g. "hourly/2026-11-13/09".
+String hourlyPath(const String &date, int hour) {
+  char hh[3];
+  snprintf(hh, sizeof(hh), "%02d", hour);
+  return "hourly/" + date + "/" + String(hh);
+}
+
+// Reads the local date and hour. Returns false if the clock isn't synced.
+bool getDateAndHour(String &date, int &hour) {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo, 1000)) return false;
+  char buf[11];
+  strftime(buf, sizeof(buf), "%Y-%m-%d", &timeinfo);
+  date = String(buf);
+  hour = timeinfo.tm_hour;
+  return true;
+}
+
+// Same idea as initDailyBaseline, for the current hour: recovers any
+// partial total already logged this hour so a reboot doesn't reset it.
+void initHourlyBaseline(float currentEnergy) {
+  String date;
+  int hour;
+  if (!getDateAndHour(date, hour)) return;
+  currentHourDate = date;
+  currentHour = hour;
+  if (Firebase.RTDB.getFloat(&fbdo, devicePath(hourlyPath(date, hour)))) {
+    hourStartEnergy = currentEnergy - fbdo.floatData();
+  } else {
+    hourStartEnergy = currentEnergy;
+  }
+}
+
+// Publishes this hour's kWh-so-far. When the hour changes, the finished
+// hour gets one last write with its final total before the new hour
+// starts counting, so usage between the last update and the change of
+// hour isn't lost.
+void updateHourly(float currentEnergy) {
+  String date;
+  int hour;
+  if (!getDateAndHour(date, hour)) return; // clock not synced yet
+
+  if (currentHour < 0) {
+    initHourlyBaseline(currentEnergy);
+  } else if (date != currentHourDate || hour != currentHour) {
+    float finished = currentEnergy - hourStartEnergy;
+    if (finished < 0) finished = 0;
+    if (!Firebase.RTDB.setFloat(&fbdo, devicePath(hourlyPath(currentHourDate, currentHour)), finished)) {
+      Serial.println("Hourly update failed: " + fbdo.errorReason());
+    }
+    currentHourDate = date;
+    currentHour = hour;
+    hourStartEnergy = currentEnergy;
+  }
+
+  float hourKwh = currentEnergy - hourStartEnergy;
+  if (hourKwh < 0) hourKwh = 0; // guards against a PZEM counter reset
+
+  if (!Firebase.RTDB.setFloat(&fbdo, devicePath(hourlyPath(currentHourDate, currentHour)), hourKwh)) {
+    Serial.println("Hourly update failed: " + fbdo.errorReason());
   }
 }
 
@@ -419,6 +489,7 @@ void setup() {
   if (!isnan(bootEnergy)) {
     lastEnergyReading = bootEnergy;
     initDailyBaseline(bootEnergy);
+    initHourlyBaseline(bootEnergy);
   }
 
   // Pick up any relay command left pending from before this device booted.
@@ -453,6 +524,7 @@ void loop() {
     lastHistoryMs = millis();
     if (!isnan(lastEnergyReading)) {
       updateHistory(lastEnergyReading);
+      updateHourly(lastEnergyReading);
     }
   }
 
