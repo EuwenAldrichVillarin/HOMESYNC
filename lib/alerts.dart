@@ -34,19 +34,131 @@ class AlertKind {
   static const daily = 'daily';
 }
 
-/// Sensible starting ceilings by appliance type, in watts. Picked to sit
-/// above normal running draw but below a fault — a starting point the
+/// A suggested "this is high" ceiling for an appliance: the power draw
+/// and the daily energy that sit above normal use for that kind of
+/// appliance. Rough estimates from typical specs, a starting point the
 /// user is expected to tune, not a safety rating.
-const Map<String, int> kDefaultMaxWatts = {
-  "Aircon": 2000,
-  "Fridge": 400,
-  "TV": 300,
-  "Light": 100,
-  "Washer": 1200,
-  "Fan": 150,
-  "Heater": 2000,
-  "Other": 1500,
+class SuggestedLimit {
+  final int maxWatts;
+  final double maxDailyKwh;
+
+  const SuggestedLimit(this.maxWatts, this.maxDailyKwh);
+}
+
+/// General estimate per appliance type. Used before a brand is picked,
+/// and for brands typed in through "Other".
+const Map<String, SuggestedLimit> kTypeSuggestedLimits = {
+  "Aircon": SuggestedLimit(1850, 14.5),
+  "Fridge": SuggestedLimit(380, 2.2),
+  "TV": SuggestedLimit(220, 1.8),
+  "Light": SuggestedLimit(60, 0.7),
+  "Washer": SuggestedLimit(900, 1.4),
+  "Fan": SuggestedLimit(90, 1.0),
+  "Heater": SuggestedLimit(4000, 3.0),
 };
+
+/// Brand-specific estimates per appliance type, based on the typical
+/// specs of each brand's common household models in the Philippines
+/// (e.g. inverter aircons and fridges draw less than non-inverter ones,
+/// DC fans less than AC ones). Models vary a lot within a brand, so
+/// these are deliberately approximate.
+const Map<String, Map<String, SuggestedLimit>> kBrandSuggestedLimits = {
+  "Aircon": {
+    "Carrier": SuggestedLimit(1900, 15.0),
+    "Koppel": SuggestedLimit(1900, 15.0),
+    "Condura": SuggestedLimit(2000, 16.0),
+    "Kolin": SuggestedLimit(2000, 16.0),
+    "LG": SuggestedLimit(1700, 13.0),
+    "Samsung": SuggestedLimit(1700, 13.0),
+    "Panasonic": SuggestedLimit(1700, 13.0),
+    "Daikin": SuggestedLimit(1600, 12.0),
+    "Midea": SuggestedLimit(1900, 15.0),
+    "TCL": SuggestedLimit(1900, 15.0),
+    "Hitachi": SuggestedLimit(1700, 13.0),
+    "Fujidenzo": SuggestedLimit(2000, 16.0),
+    "American Home": SuggestedLimit(2000, 16.0),
+  },
+  "Fridge": {
+    "Samsung": SuggestedLimit(350, 2.0),
+    "LG": SuggestedLimit(350, 2.0),
+    "Panasonic": SuggestedLimit(330, 1.9),
+    "Sharp": SuggestedLimit(380, 2.2),
+    "Condura": SuggestedLimit(400, 2.4),
+    "Whirlpool": SuggestedLimit(400, 2.4),
+    "Fujidenzo": SuggestedLimit(420, 2.5),
+    "Hisense": SuggestedLimit(380, 2.2),
+    "Midea": SuggestedLimit(380, 2.2),
+    "Haier": SuggestedLimit(380, 2.2),
+    "Electrolux": SuggestedLimit(380, 2.2),
+    "American Home": SuggestedLimit(420, 2.5),
+  },
+  "TV": {
+    "Samsung": SuggestedLimit(250, 2.0),
+    "LG": SuggestedLimit(250, 2.0),
+    "Sony": SuggestedLimit(260, 2.1),
+    "TCL": SuggestedLimit(220, 1.8),
+    "Hisense": SuggestedLimit(220, 1.8),
+    "Sharp": SuggestedLimit(220, 1.8),
+    "Panasonic": SuggestedLimit(230, 1.9),
+    "Xiaomi": SuggestedLimit(200, 1.6),
+    "Skyworth": SuggestedLimit(200, 1.6),
+    "Devant": SuggestedLimit(200, 1.6),
+    "Coocaa": SuggestedLimit(180, 1.5),
+  },
+  "Light": {
+    "Philips": SuggestedLimit(60, 0.7),
+    "Firefly": SuggestedLimit(60, 0.7),
+    "Omni": SuggestedLimit(60, 0.7),
+    "Akari": SuggestedLimit(60, 0.7),
+    "Osram": SuggestedLimit(60, 0.7),
+    "GE": SuggestedLimit(70, 0.8),
+    "Xiaomi": SuggestedLimit(40, 0.5),
+    "TP-Link Tapo": SuggestedLimit(40, 0.5),
+  },
+  "Washer": {
+    "LG": SuggestedLimit(1000, 1.5),
+    "Samsung": SuggestedLimit(1000, 1.5),
+    "Panasonic": SuggestedLimit(900, 1.4),
+    "Electrolux": SuggestedLimit(2100, 2.5),
+    "Whirlpool": SuggestedLimit(1000, 1.5),
+    "Sharp": SuggestedLimit(600, 1.0),
+    "Fujidenzo": SuggestedLimit(500, 0.9),
+    "Haier": SuggestedLimit(900, 1.4),
+    "Hanabishi": SuggestedLimit(500, 0.9),
+    "Midea": SuggestedLimit(800, 1.3),
+    "American Home": SuggestedLimit(500, 0.9),
+  },
+  "Fan": {
+    "Asahi": SuggestedLimit(90, 1.0),
+    "Hanabishi": SuggestedLimit(90, 1.0),
+    "Standard": SuggestedLimit(90, 1.0),
+    "Dowell": SuggestedLimit(90, 1.0),
+    "Kolin": SuggestedLimit(80, 0.9),
+    "Union": SuggestedLimit(90, 1.0),
+    "Imarflex": SuggestedLimit(90, 1.0),
+    "Xiaomi": SuggestedLimit(40, 0.5),
+    "Panasonic": SuggestedLimit(80, 0.9),
+    "Iwata": SuggestedLimit(150, 1.6),
+    "Camel": SuggestedLimit(100, 1.1),
+  },
+  "Heater": {
+    "Ariston": SuggestedLimit(4000, 3.0),
+    "Panasonic": SuggestedLimit(4000, 3.0),
+    "Joven": SuggestedLimit(4000, 3.0),
+    "Rheem": SuggestedLimit(3600, 3.5),
+    "Centon": SuggestedLimit(4000, 3.0),
+    "Alpha": SuggestedLimit(4000, 3.0),
+    "Electrolux": SuggestedLimit(4000, 3.0),
+    "Imarflex": SuggestedLimit(2500, 2.5),
+  },
+};
+
+/// The estimate for a type and brand. Falls back to the type's general
+/// estimate when the brand is unknown (null, or typed via "Other").
+SuggestedLimit? suggestedLimitFor(String? type, String? brand) {
+  if (type == null) return null;
+  return kBrandSuggestedLimits[type]?[brand] ?? kTypeSuggestedLimits[type];
+}
 
 /// Below this, a percentage swing isn't worth anyone's attention: a
 /// device going from 0.01 to 0.02 kWh is "100% over" and means nothing.

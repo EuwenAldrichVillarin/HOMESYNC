@@ -5,6 +5,23 @@
   Libraries (install via Arduino IDE Library Manager):
     - "Firebase Arduino Client Library for ESP8266 and ESP32" by Mobizt
     - "PZEM-004T-v30" by Jakub Mandula
+    - "WiFiManager" by tzapu (v2.0.x)
+
+  WiFi setup (no credentials in this file):
+    On first boot, or after "Reset WiFi" in the app, the plug has no saved
+    network and opens its own open hotspot named "HomeSync-XXXX" (last 4
+    characters of the Device ID). Join it from a phone, the setup page
+    opens (or browse to 192.168.4.1), tap "Configure WiFi", pick the home
+    network and enter its password. The page also shows the Device ID to
+    type into the app's Add Appliance screen. The network is saved on the
+    plug, which then restarts normally and keeps using it.
+
+    If the saved network is unreachable at boot the plug keeps retrying
+    it rather than reopening the hotspot, so a router outage doesn't
+    leave the plug stuck in setup mode. Changing networks is done from
+    the app (Edit Appliance > Reset WiFi), which sets
+    devices/{DEVICE_ID}/wifiReset; the plug clears it, forgets its WiFi
+    and restarts into the hotspot.
 
   Wiring:
     PZEM-004T TX  -> ESP32 GPIO16 (RX2)
@@ -23,8 +40,13 @@
     devices/{DEVICE_ID}/history/{date}   number  kWh used on that calendar date (YYYY-MM-DD, local time),
                                                   this device writes it — the app's Report screen reads it
                                                   to build the daily/weekly/monthly usage chart
+    devices/{DEVICE_ID}/hourly/{date}/{HH} number kWh used in that hour of that date (HH = "00".."23",
+                                                  local time), this device writes it — the Report
+                                                  screen's Hour view reads today's 24 values
     devices/{DEVICE_ID}/schedule         map     {enabled, days: {mon..sun}, startMinutes, endMinutes}
     devices/{DEVICE_ID}/limits           map     {maxWatts, maxDailyKwh}  (the app writes, this device reads)
+    devices/{DEVICE_ID}/wifiReset        bool    true = forget WiFi and reopen the setup hotspot
+                                                  (the app sets it, this device clears it)
     alerts/{OWNER_UID}/{ALERT_ID}        map     raised here when a limit is exceeded; the id is
                                                   "{DEVICE_ID}-{kind}-{YYYY-MM-DD}" so the same breach
                                                   can only ever be filed once a day
@@ -51,13 +73,15 @@
 #include <WiFi.h>
 #include <time.h>
 #include <PZEM004Tv30.h>
+#include <WiFiManager.h>
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
 #include <addons/RTDBHelper.h>
 
 // ---------------- USER CONFIG ----------------
-#define WIFI_SSID         "Euwen"
-#define WIFI_PASSWORD     "kalimotko"
+// WiFi is no longer set here: it's entered through the setup hotspot
+// (see the top of this file).
+#define SETUP_AP_PREFIX   "HomeSync-"
 
 #define API_KEY           "AIzaSyDjk93m1qry_vN5GJisTzv354B5_dJuqPc"
 #define DATABASE_URL      "https://homesync-386ee-default-rtdb.asia-southeast1.firebasedatabase.app/"
@@ -78,6 +102,7 @@
 #define HISTORY_INTERVAL_MS   60000  // how often to update today's running kWh total
 #define SCHEDULE_INTERVAL_MS  30000  // how often to check devices/{id}/schedule
 #define LIMITS_INTERVAL_MS    60000  // how often to re-read devices/{id}/limits
+#define WIFI_RESET_INTERVAL_MS 10000 // how often to check devices/{id}/wifiReset
 
 #define GMT_OFFSET_SEC   (8 * 3600) // Asia/Manila, UTC+8 — change for your timezone
 #define DST_OFFSET_SEC   0
@@ -89,6 +114,9 @@ FirebaseData fbdo;
 FirebaseData streamFbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
+
+WiFiManager wifiManager;
+unsigned long lastWifiResetMs = 0;
 
 bool relayState = false;
 unsigned long lastTelemetryMs = 0;
@@ -119,6 +147,10 @@ float lastEnergyReading = NAN;   // most recent successful pzem.energy() reading
 String currentDay;               // "YYYY-MM-DD" this device is currently logging against
 float dayStartEnergy = 0;        // cumulative energy reading at the start of currentDay
 bool dayBaselineReady = false;   // false until dayStartEnergy means something
+
+String currentHourDate;          // "YYYY-MM-DD" of the hour being logged
+int currentHour = -1;            // 0..23, -1 until the first hourly baseline is set
+float hourStartEnergy = 0;       // cumulative energy reading at the start of currentHour
 
 String macToDeviceId() {
   String mac = WiFi.macAddress(); // e.g. "AA:BB:CC:DD:EE:FF"
@@ -158,6 +190,69 @@ void initDailyBaseline(float currentEnergy) {
     dayStartEnergy = currentEnergy - fbdo.floatData();
   } else {
     dayStartEnergy = currentEnergy;
+  }
+}
+
+// Path of one hour's slot, e.g. "hourly/2026-11-13/09".
+String hourlyPath(const String &date, int hour) {
+  char hh[3];
+  snprintf(hh, sizeof(hh), "%02d", hour);
+  return "hourly/" + date + "/" + String(hh);
+}
+
+// Reads the local date and hour. Returns false if the clock isn't synced.
+bool getDateAndHour(String &date, int &hour) {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo, 1000)) return false;
+  char buf[11];
+  strftime(buf, sizeof(buf), "%Y-%m-%d", &timeinfo);
+  date = String(buf);
+  hour = timeinfo.tm_hour;
+  return true;
+}
+
+// Same idea as initDailyBaseline, for the current hour: recovers any
+// partial total already logged this hour so a reboot doesn't reset it.
+void initHourlyBaseline(float currentEnergy) {
+  String date;
+  int hour;
+  if (!getDateAndHour(date, hour)) return;
+  currentHourDate = date;
+  currentHour = hour;
+  if (Firebase.RTDB.getFloat(&fbdo, devicePath(hourlyPath(date, hour)))) {
+    hourStartEnergy = currentEnergy - fbdo.floatData();
+  } else {
+    hourStartEnergy = currentEnergy;
+  }
+}
+
+// Publishes this hour's kWh-so-far. When the hour changes, the finished
+// hour gets one last write with its final total before the new hour
+// starts counting, so usage between the last update and the change of
+// hour isn't lost.
+void updateHourly(float currentEnergy) {
+  String date;
+  int hour;
+  if (!getDateAndHour(date, hour)) return; // clock not synced yet
+
+  if (currentHour < 0) {
+    initHourlyBaseline(currentEnergy);
+  } else if (date != currentHourDate || hour != currentHour) {
+    float finished = currentEnergy - hourStartEnergy;
+    if (finished < 0) finished = 0;
+    if (!Firebase.RTDB.setFloat(&fbdo, devicePath(hourlyPath(currentHourDate, currentHour)), finished)) {
+      Serial.println("Hourly update failed: " + fbdo.errorReason());
+    }
+    currentHourDate = date;
+    currentHour = hour;
+    hourStartEnergy = currentEnergy;
+  }
+
+  float hourKwh = currentEnergy - hourStartEnergy;
+  if (hourKwh < 0) hourKwh = 0; // guards against a PZEM counter reset
+
+  if (!Firebase.RTDB.setFloat(&fbdo, devicePath(hourlyPath(currentHourDate, currentHour)), hourKwh)) {
+    Serial.println("Hourly update failed: " + fbdo.errorReason());
   }
 }
 
@@ -368,6 +463,76 @@ void sendTelemetry() {
   checkLimits(power, todayKwh);
 }
 
+// ---------------- WIFI SETUP ----------------
+
+// Connects to the saved network, or opens the setup hotspot if there
+// isn't one. Blocks until connected either way.
+void connectWiFi() {
+  if (!wifiManager.getWiFiIsSaved()) {
+    runSetupPortal();
+    return;
+  }
+
+  // A saved network: keep retrying it. Deliberately no fallback to the
+  // hotspot here, so a router being down for a while doesn't strand the
+  // plug in setup mode. Changing networks is done from the app.
+  WiFi.begin();
+  Serial.print("Connecting to saved WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected: " + WiFi.localIP().toString());
+}
+
+// Opens the "HomeSync-XXXX" hotspot and waits for the user to choose a
+// network on the setup page. Restarts once the network is saved.
+void runSetupPortal() {
+  String apName = String(SETUP_AP_PREFIX) + deviceId.substring(deviceId.length() - 4);
+
+  // Shown on the "Configure WiFi" page so the user can copy the Device ID
+  // into the app. WiFiManager keeps a pointer to this, hence static.
+  static String deviceIdHtml;
+  deviceIdHtml =
+      "<p style='margin:12px 0 4px'>Device ID (enter this in the HomeSync app):</p>"
+      "<p style='font-size:1.4em;font-weight:bold;letter-spacing:1px;margin:0 0 12px'>" +
+      deviceId + "</p>";
+  static WiFiManagerParameter deviceIdInfo(deviceIdHtml.c_str());
+  wifiManager.addParameter(&deviceIdInfo);
+
+  wifiManager.setTitle("HomeSync Smart Plug");
+  wifiManager.setConfigPortalTimeout(0); // stay open until set up
+  wifiManager.setConnectTimeout(20);
+
+  Serial.println("No WiFi saved. Join the hotspot \"" + apName +
+                 "\" and open 192.168.4.1 to set it up.");
+
+  if (wifiManager.startConfigPortal(apName.c_str())) {
+    Serial.println("WiFi saved: " + WiFi.SSID());
+  }
+  // Start clean on the newly saved network (or retry the portal if it
+  // somehow returned without one).
+  delay(1000);
+  ESP.restart();
+}
+
+// The app's "Reset WiFi" sets devices/{id}/wifiReset = true. The flag is
+// cleared first so the plug doesn't loop on it after reconnecting, then
+// the saved network is forgotten and the plug restarts into the hotspot.
+void checkWifiReset() {
+  if (!Firebase.RTDB.getBool(&fbdo, devicePath("wifiReset"))) return;
+  if (!fbdo.boolData()) return;
+
+  Serial.println("WiFi reset requested from the app");
+  if (!Firebase.RTDB.deleteNode(&fbdo, devicePath("wifiReset"))) {
+    Serial.println("Couldn't clear wifiReset: " + fbdo.errorReason());
+    return; // try again next cycle rather than reset in a loop
+  }
+  wifiManager.resetSettings();
+  delay(1000);
+  ESP.restart();
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -375,13 +540,12 @@ void setup() {
   writeRelayPin(false); // safe default before Firebase/WiFi are up
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(300);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected: " + WiFi.localIP().toString());
+  deviceId = macToDeviceId(); // needs the WiFi driver up, which WiFi.mode() does
+  Serial.println("======================================");
+  Serial.println("DEVICE ID (enter this in the Homesync app): " + deviceId);
+  Serial.println("======================================");
+
+  connectWiFi();
 
   configTime(GMT_OFFSET_SEC, DST_OFFSET_SEC, "pool.ntp.org", "time.nist.gov");
   Serial.print("Syncing time");
@@ -390,11 +554,6 @@ void setup() {
     Serial.print(".");
   }
   Serial.println();
-
-  deviceId = macToDeviceId();
-  Serial.println("======================================");
-  Serial.println("DEVICE ID (enter this in the Homesync app): " + deviceId);
-  Serial.println("======================================");
 
   config.api_key = API_KEY;
   config.database_url = DATABASE_URL;
@@ -419,6 +578,7 @@ void setup() {
   if (!isnan(bootEnergy)) {
     lastEnergyReading = bootEnergy;
     initDailyBaseline(bootEnergy);
+    initHourlyBaseline(bootEnergy);
   }
 
   // Pick up any relay command left pending from before this device booted.
@@ -453,7 +613,13 @@ void loop() {
     lastHistoryMs = millis();
     if (!isnan(lastEnergyReading)) {
       updateHistory(lastEnergyReading);
+      updateHourly(lastEnergyReading);
     }
+  }
+
+  if (Firebase.ready() && millis() - lastWifiResetMs > WIFI_RESET_INTERVAL_MS) {
+    lastWifiResetMs = millis();
+    checkWifiReset();
   }
 
   if (Firebase.ready() && millis() - lastScheduleMs > SCHEDULE_INTERVAL_MS) {

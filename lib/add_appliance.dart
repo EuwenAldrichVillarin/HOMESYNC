@@ -8,8 +8,8 @@ import 'activity.dart';
 
 // ===================================================================
 // APPLIANCE TYPE OPTIONS
-// Each has an icon shown in the type picker grid. Extend this list if
-// you add new appliance categories later.
+// Each has an icon shown in the type picker grid. Extend this list (and
+// kApplianceBrands below) if you add new appliance categories later.
 // ===================================================================
 class ApplianceType {
   final String label;
@@ -26,7 +26,66 @@ const List<ApplianceType> kApplianceTypes = [
   ApplianceType("Washer", Icons.local_laundry_service),
   ApplianceType("Fan", Icons.mode_fan_off),
   ApplianceType("Heater", Icons.thermostat),
-  ApplianceType("Other", Icons.power),
+];
+
+/// Value used in the Brand and Room dropdowns for "not in the list".
+/// Picking it shows a text box so the user can type their own.
+const String kOtherOption = "Other";
+
+// ===================================================================
+// BRANDS PER APPLIANCE TYPE
+// The Brand dropdown only lists the brands for the selected type, so a
+// user can't pair e.g. "Daikin" with a TV. Anything missing is covered
+// by the "Other" option at the bottom of the dropdown.
+// ===================================================================
+const Map<String, List<String>> kApplianceBrands = {
+  "Aircon": [
+    "Carrier", "Koppel", "Condura", "Kolin", "LG", "Samsung", "Panasonic",
+    "Daikin", "Midea", "TCL", "Hitachi", "Fujidenzo", "American Home",
+  ],
+  "Fridge": [
+    "Samsung", "LG", "Panasonic", "Sharp", "Condura", "Whirlpool",
+    "Fujidenzo", "Hisense", "Midea", "Haier", "Electrolux", "American Home",
+  ],
+  "TV": [
+    "Samsung", "LG", "Sony", "TCL", "Hisense", "Sharp", "Panasonic",
+    "Xiaomi", "Skyworth", "Devant", "Coocaa",
+  ],
+  "Light": [
+    "Philips", "Firefly", "Omni", "Akari", "Osram", "GE", "Xiaomi",
+    "TP-Link Tapo",
+  ],
+  "Washer": [
+    "LG", "Samsung", "Panasonic", "Electrolux", "Whirlpool", "Sharp",
+    "Fujidenzo", "Haier", "Hanabishi", "Midea", "American Home",
+  ],
+  "Fan": [
+    "Asahi", "Hanabishi", "Standard", "Dowell", "Kolin", "Union",
+    "Imarflex", "Xiaomi", "Panasonic", "Iwata", "Camel",
+  ],
+  "Heater": [
+    "Ariston", "Panasonic", "Joven", "Rheem", "Centon", "Alpha",
+    "Electrolux", "Imarflex",
+  ],
+};
+
+// ===================================================================
+// ROOMS
+// Fixed list for the Room dropdown; "Other" lets the user type a room
+// that isn't here.
+// ===================================================================
+const List<String> kRooms = [
+  "Living Room",
+  "Kitchen",
+  "Dining Room",
+  "Bedroom",
+  "Master Bedroom",
+  "Kids' Room",
+  "Bathroom",
+  "Laundry Area",
+  "Home Office",
+  "Garage",
+  "Outdoor / Garden",
 ];
 
 class AddAppliancePage extends StatefulWidget {
@@ -45,16 +104,22 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
 
   final _deviceIdController = TextEditingController();
   final _nameController = TextEditingController();
-  final _roomController = TextEditingController();
+  final _customBrandController = TextEditingController();
+  final _customRoomController = TextEditingController();
   final _maxWattsController = TextEditingController();
   final _maxDailyKwhController = TextEditingController();
 
   ApplianceType? _selectedType;
+  // Dropdown selections. Either can be kOtherOption, in which case the
+  // real value is whatever was typed in the matching custom controller.
+  String? _selectedBrand;
+  String? _selectedRoom;
   bool _isSaving = false;
   bool _isRemoving = false;
+  bool _isResettingWifi = false;
   bool _isLoadingExisting = false;
 
-  bool get _isBusy => _isSaving || _isRemoving;
+  bool get _isBusy => _isSaving || _isRemoving || _isResettingWifi;
 
   bool get _isEditing => widget.editDeviceId != null;
 
@@ -85,26 +150,119 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
       final info = snapshot.value;
       if (info is Map) {
         _nameController.text = (info['name'] as String?) ?? '';
-        _roomController.text = (info['room'] as String?) ?? '';
         final typeLabel = info['type'] as String?;
         _selectedType = kApplianceTypes.cast<ApplianceType?>().firstWhere(
               (t) => t?.label == typeLabel,
               orElse: () => null,
             );
+
+        // A saved value that isn't in the list (typed via "Other", or
+        // from before these were dropdowns) reopens as "Other" with the
+        // text filled in, so nothing the user entered is lost.
+        final brand = ((info['brand'] as String?) ?? '').trim();
+        if (brand.isNotEmpty && _selectedType != null) {
+          if (_brandsFor(_selectedType).contains(brand)) {
+            _selectedBrand = brand;
+          } else {
+            _selectedBrand = kOtherOption;
+            _customBrandController.text = brand;
+          }
+        }
+
+        final room = ((info['room'] as String?) ?? '').trim();
+        if (room.isNotEmpty) {
+          if (kRooms.contains(room)) {
+            _selectedRoom = room;
+          } else {
+            _selectedRoom = kOtherOption;
+            _customRoomController.text = room;
+          }
+        }
       }
     } finally {
       if (mounted) setState(() => _isLoadingExisting = false);
     }
   }
 
-  /// Pre-fills the power ceiling when a type is chosen on a new
-  /// appliance. A limit nobody sets is a limit that never fires, so the
-  /// form starts from a plausible number rather than an empty box —
-  /// while leaving anything the user has already typed alone.
-  void _applyDefaultWattsFor(ApplianceType type) {
-    if (_maxWattsController.text.trim().isNotEmpty) return;
-    final suggested = kDefaultMaxWatts[type.label];
-    if (suggested != null) _maxWattsController.text = suggested.toString();
+  List<String> _brandsFor(ApplianceType? type) =>
+      type == null ? const [] : (kApplianceBrands[type.label] ?? const []);
+
+  /// Picking a type. A brand chosen for the previous type may not make
+  /// the new one, so changing the type clears the brand and the user
+  /// picks again.
+  void _selectType(ApplianceType type) {
+    setState(() {
+      if (_selectedType != type) {
+        _selectedBrand = null;
+        _customBrandController.clear();
+      }
+      _selectedType = type;
+      _applySuggestedLimits();
+    });
+  }
+
+  String get _brandValue => _selectedBrand == kOtherOption
+      ? _customBrandController.text.trim()
+      : (_selectedBrand ?? '');
+
+  String get _roomValue => _selectedRoom == kOtherOption
+      ? _customRoomController.text.trim()
+      : (_selectedRoom ?? '');
+
+  // What the limit boxes were last auto-filled with. A box still holding
+  // exactly this (or empty) hasn't been touched by the user, so it's
+  // safe to replace when the type or brand changes; anything else is the
+  // user's own number and is left alone.
+  String? _autoFilledWatts;
+  String? _autoFilledKwh;
+
+  /// The estimate for the current type + brand. "Other" brands use the
+  /// type's general estimate.
+  SuggestedLimit? get _suggestedLimit => suggestedLimitFor(
+        _selectedType?.label,
+        _selectedBrand == kOtherOption ? null : _selectedBrand,
+      );
+
+  /// Fills the alert boxes with the estimate for the current type and
+  /// brand. A limit nobody sets is a limit that never fires, so the form
+  /// starts from a plausible number rather than an empty box — while
+  /// keeping any number the user typed themselves.
+  void _applySuggestedLimits() {
+    final suggestion = _suggestedLimit;
+    if (suggestion == null) return;
+
+    final watts = suggestion.maxWatts.toString();
+    final kwh = _formatKwh(suggestion.maxDailyKwh);
+
+    final wattsText = _maxWattsController.text.trim();
+    if (wattsText.isEmpty || wattsText == _autoFilledWatts) {
+      _maxWattsController.text = watts;
+      _autoFilledWatts = watts;
+    }
+
+    final kwhText = _maxDailyKwhController.text.trim();
+    if (kwhText.isEmpty || kwhText == _autoFilledKwh) {
+      _maxDailyKwhController.text = kwh;
+      _autoFilledKwh = kwh;
+    }
+  }
+
+  String _formatKwh(double value) =>
+      value == value.roundToDouble() ? value.toStringAsFixed(0) : value.toString();
+
+  /// "Suggested for Daikin Aircon: 1,600 W · 12 kWh/day" under the boxes,
+  /// so the estimate stays visible even after the user changes a number.
+  String? get _suggestionHint {
+    final suggestion = _suggestedLimit;
+    final type = _selectedType;
+    if (suggestion == null || type == null) return null;
+    final brand = (_selectedBrand == null || _selectedBrand == kOtherOption) ? null : _selectedBrand;
+    final watts = suggestion.maxWatts.toString().replaceAllMapped(
+          RegExp(r'(\d)(?=(\d{3})+$)'),
+          (m) => '${m[1]},',
+        );
+    final label = brand == null ? type.label : "$brand ${type.label}";
+    return "Suggested for $label: $watts W · ${_formatKwh(suggestion.maxDailyKwh)} kWh/day";
   }
 
   /// Parses a limit box. Empty means "no limit", which is written as null
@@ -121,7 +279,8 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
   void dispose() {
     _deviceIdController.dispose();
     _nameController.dispose();
-    _roomController.dispose();
+    _customBrandController.dispose();
+    _customRoomController.dispose();
     _maxWattsController.dispose();
     _maxDailyKwhController.dispose();
     super.dispose();
@@ -142,13 +301,15 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
   // SAVE — claims the device for the current user in Realtime Database
   // ===============================================================
   Future<void> _handleSave() async {
-    if (!_formKey.currentState!.validate()) return;
+    // Checked before the form so the message isn't buried under the
+    // Brand dropdown's own "pick a type first" error.
     if (_selectedType == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please select an appliance type")),
       );
       return;
     }
+    if (!_formKey.currentState!.validate()) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -173,7 +334,8 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
     // duplicate entries (e.g. "a1b2c3" vs "A1B2C3").
     final deviceId = _deviceIdController.text.trim().toUpperCase();
     final name = _nameController.text.trim();
-    final room = _roomController.text.trim();
+    final room = _roomValue;
+    final brand = _brandValue;
 
     setState(() => _isSaving = true);
 
@@ -190,6 +352,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
             'name': name,
             'room': room,
             'type': _selectedType!.label,
+            'brand': brand,
           },
           // null clears a limit, which is what an emptied box means.
           'devices/$deviceId/limits/maxWatts': maxWatts,
@@ -235,6 +398,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
           'name': name,
           'room': room,
           'type': _selectedType!.label,
+          'brand': brand,
         },
         'devices/$deviceId/limits/maxWatts': maxWatts,
         'devices/$deviceId/limits/maxDailyKwh': maxDailyKwh,
@@ -294,6 +458,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
         'devices/$deviceId/info': null,
         'devices/$deviceId/schedule': null,
         'devices/$deviceId/limits': null,
+        'devices/$deviceId/wifiReset': null,
         'users/${user.uid}/appliances/$deviceId': null,
       });
 
@@ -308,6 +473,73 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
       if (!mounted) return;
       setState(() => _isRemoving = false);
       _showError("Couldn't remove the appliance: $e");
+    }
+  }
+
+  // ===============================================================
+  // RESET WIFI — tells the plug to forget its WiFi network and reopen
+  // its "HomeSync-XXXX" setup hotspot, e.g. after changing routers.
+  // The plug checks devices/{id}/wifiReset every ~10 seconds, clears it
+  // and restarts. It's offline until it's set up again on the hotspot,
+  // but it stays claimed, so nothing has to be re-added in the app.
+  // ===============================================================
+  Future<void> _handleResetWifi() async {
+    final deviceId = widget.editDeviceId;
+    if (deviceId == null) return;
+
+    final session = HouseholdSession.current;
+    if (session != null && !session.canManageAppliances) {
+      _showError("Only the household admin can reset an appliance's WiFi");
+      return;
+    }
+
+    final hotspot = "HomeSync-${deviceId.substring(deviceId.length - 4)}";
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          "Reset WiFi?",
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1F2937)),
+        ),
+        content: Text(
+          "The plug will forget its WiFi network and go offline. Within a few seconds it opens "
+          "a setup hotspot called \"$hotspot\".\n\n"
+          "Join that hotspot from your phone, tap \"Configure WiFi\", pick your network and enter "
+          "its password. The plug then reconnects and stays in your household.",
+          style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text("Cancel", style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F766E),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text("Reset WiFi"),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _isResettingWifi = true);
+    try {
+      await FirebaseDatabase.instance.ref('devices/$deviceId/wifiReset').set(true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Reset sent. Join \"$hotspot\" to connect it to the new network.")),
+      );
+    } catch (e) {
+      _showError("Couldn't reset WiFi: $e");
+    } finally {
+      if (mounted) setState(() => _isResettingWifi = false);
     }
   }
 
@@ -503,6 +735,186 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                       const SizedBox(height: 26),
 
                       // =================================================
+                      // APPLIANCE TYPE
+                      // =================================================
+                      const Text(
+                        "Appliance Type",
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF4B5563),
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      GridView.count(
+                        crossAxisCount: 4,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 0.85,
+                        children: kApplianceTypes.map((type) {
+                          final selected = _selectedType == type;
+
+                          return GestureDetector(
+                            onTap: _isBusy ? null : () => _selectType(type),
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 56,
+                                  height: 56,
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? const Color(0xFF0F766E)
+                                        : Colors.white,
+                                    borderRadius:
+                                        BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: selected
+                                          ? const Color(0xFF0F766E)
+                                          : const Color(0xFFE2E8F0),
+                                      width: selected ? 0 : 1,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    type.icon,
+                                    color: selected
+                                        ? Colors.white
+                                        : const Color(0xFF64748B),
+                                    size: 24,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  type.label,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: selected
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    color: selected
+                                        ? const Color(0xFF0F766E)
+                                        : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+
+                      const SizedBox(height: 26),
+
+                      // =================================================
+                      // BRAND (only brands that make the selected type)
+                      // =================================================
+                      _fieldLabel("Brand"),
+
+                      const SizedBox(height: 8),
+
+                      DropdownButtonFormField<String>(
+                        // Rebuilt when the type changes so the cleared
+                        // brand actually shows as cleared.
+                        key: ValueKey('brand_${_selectedType?.label}'),
+                        initialValue: _selectedBrand,
+                        isExpanded: true,
+                        borderRadius: BorderRadius.circular(16),
+                        dropdownColor: Colors.white,
+                        decoration: _fieldDecoration(
+                          _selectedType == null ? "Select an appliance type first" : "Select brand",
+                        ),
+                        items: _selectedType == null
+                            ? null
+                            : [
+                                for (final brand in _brandsFor(_selectedType))
+                                  DropdownMenuItem(value: brand, child: Text(brand)),
+                                const DropdownMenuItem(
+                                  value: kOtherOption,
+                                  child: Text("Other (type brand)"),
+                                ),
+                              ],
+                        onChanged: _isBusy
+                            ? null
+                            : (value) => setState(() {
+                                  _selectedBrand = value;
+                                  if (value != kOtherOption) _customBrandController.clear();
+                                  _applySuggestedLimits();
+                                }),
+                        validator: (value) {
+                          if (_selectedType == null) return "Select an appliance type first";
+                          if (value == null) return "Select a brand";
+                          return null;
+                        },
+                      ),
+
+                      if (_selectedBrand == kOtherOption) ...[
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: _customBrandController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: _fieldDecoration("Enter the brand"),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return "Enter the brand of this appliance";
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+
+                      const SizedBox(height: 26),
+
+                      // =================================================
+                      // ROOM
+                      // =================================================
+                      _fieldLabel("Room"),
+
+                      const SizedBox(height: 8),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedRoom,
+                        isExpanded: true,
+                        borderRadius: BorderRadius.circular(16),
+                        dropdownColor: Colors.white,
+                        decoration: _fieldDecoration("Select room"),
+                        items: [
+                          for (final room in kRooms)
+                            DropdownMenuItem(value: room, child: Text(room)),
+                          const DropdownMenuItem(
+                            value: kOtherOption,
+                            child: Text("Other (type room)"),
+                          ),
+                        ],
+                        onChanged: _isBusy
+                            ? null
+                            : (value) => setState(() {
+                                  _selectedRoom = value;
+                                  if (value != kOtherOption) _customRoomController.clear();
+                                }),
+                        validator: (value) => value == null ? "Select which room this is in" : null,
+                      ),
+
+                      if (_selectedRoom == kOtherOption) ...[
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: _customRoomController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: _fieldDecoration("Enter the room"),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return "Enter which room this is in";
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+
+                      const SizedBox(height: 26),
+
+                      // =================================================
                       // APPLIANCE NAME
                       // =================================================
                       const Text(
@@ -522,33 +934,6 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
                             return "Give this appliance a name";
-                          }
-                          return null;
-                        },
-                      ),
-
-                      const SizedBox(height: 26),
-
-                      // =================================================
-                      // ROOM
-                      // =================================================
-                      const Text(
-                        "Room",
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF4B5563),
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      TextFormField(
-                        controller: _roomController,
-                        decoration: _fieldDecoration("e.g. Living Room"),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return "Enter which room this is in";
                           }
                           return null;
                         },
@@ -607,84 +992,25 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                         ],
                       ),
 
-                      const SizedBox(height: 26),
-
-                      // =================================================
-                      // APPLIANCE TYPE
-                      // =================================================
-                      const Text(
-                        "Appliance Type",
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF4B5563),
-                        ),
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      GridView.count(
-                        crossAxisCount: 4,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 0.85,
-                        children: kApplianceTypes.map((type) {
-                          final selected = _selectedType == type;
-
-                          return GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _selectedType = type;
-                                _applyDefaultWattsFor(type);
-                              });
-                            },
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 56,
-                                  height: 56,
-                                  decoration: BoxDecoration(
-                                    color: selected
-                                        ? const Color(0xFF0F766E)
-                                        : Colors.white,
-                                    borderRadius:
-                                        BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: selected
-                                          ? const Color(0xFF0F766E)
-                                          : const Color(0xFFE2E8F0),
-                                      width: selected ? 0 : 1,
-                                    ),
-                                  ),
-                                  child: Icon(
-                                    type.icon,
-                                    color: selected
-                                        ? Colors.white
-                                        : const Color(0xFF64748B),
-                                    size: 24,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  type.label,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: selected
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                    color: selected
-                                        ? const Color(0xFF0F766E)
-                                        : const Color(0xFF64748B),
-                                  ),
-                                ),
-                              ],
+                      if (_suggestionHint != null) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.only(top: 1),
+                              child: Icon(Icons.info_outline, size: 14, color: Color(0xFF0F766E)),
                             ),
-                          );
-                        }).toList(),
-                      ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                _suggestionHint!,
+                                style: const TextStyle(fontSize: 11, color: Color(0xFF0F766E)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
 
                       const SizedBox(height: 40),
 
@@ -754,6 +1080,38 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                           width: double.infinity,
                           height: 56,
                           child: OutlinedButton.icon(
+                            onPressed: _isBusy ? null : _handleResetWifi,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF0F766E),
+                              side: const BorderSide(color: Color(0xFF99D5CF)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                            ),
+                            icon: _isResettingWifi
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      color: Color(0xFF0F766E),
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.wifi_off_outlined, size: 19),
+                            label: const Text(
+                              "Reset WiFi",
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 56,
+                          child: OutlinedButton.icon(
                             onPressed: _isBusy ? null : _handleRemove,
                             style: OutlinedButton.styleFrom(
                               foregroundColor: const Color(0xFFDC2626),
@@ -802,6 +1160,17 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
     if (parsed <= 0) return "Must be more than 0";
     if (parsed > max) return "Too high (max ${max.toStringAsFixed(0)} $unit)";
     return null;
+  }
+
+  Widget _fieldLabel(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: Color(0xFF4B5563),
+      ),
+    );
   }
 
   InputDecoration _fieldDecoration(String hint) {

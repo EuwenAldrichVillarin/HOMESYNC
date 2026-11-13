@@ -245,12 +245,24 @@ Arduino IDE with the ESP32 board package, plus:
 
 - *Firebase Arduino Client Library for ESP8266 and ESP32* (Mobizt)
 - *PZEM-004T-v30* (Jakub Mandula)
+- *WiFiManager* (tzapu)
 
-Set WiFi credentials, the Firebase API key and database URL, and the
-plug account's email and password at the top of
-`firmware/esp32_smart_plug/esp32_smart_plug.ino`, then upload. The serial
-monitor at 115200 prints the device ID — that's what you type into
-**Add Appliance**.
+Set the Firebase API key and database URL, and the plug account's email
+and password at the top of `firmware/esp32_smart_plug/esp32_smart_plug.ino`,
+then upload. WiFi is not set in the code.
+
+**Connecting a plug to WiFi:** on first boot the plug opens an open
+hotspot named `HomeSync-XXXX` (the last 4 characters of its device ID).
+Join it from a phone; the setup page opens (or go to `192.168.4.1`).
+Tap **Configure WiFi**, pick your network and enter its password. The
+same page shows the device ID — that's what you type into
+**Add Appliance**. The serial monitor at 115200 prints it too.
+
+To move a plug to a different network, open the appliance in the app
+(**Edit Appliance → Reset WiFi**). The plug forgets its network and
+reopens the `HomeSync-XXXX` hotspot. If the saved network is just
+temporarily down, the plug keeps retrying it instead of reopening the
+hotspot.
 
 > **Do not commit real WiFi credentials.** They are impossible to remove
 > from git history once pushed, and a public repo means a public

@@ -4,25 +4,28 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 
 import 'household.dart';
+import 'rate_dialog.dart';
 import 'members.dart';
 
 // Fallback used until users/{uid}/settings/pesoPerKwh loads (or if it was
-// never set). Editable from the Home screen's rate button.
+// never set). Editable from the rate button on Home and on this screen.
 const double _kDefaultPesoPerKwh = 11.0;
 
-enum _ReportRange { day, week, month, custom }
+enum _ReportRange { hour, day, week, month, custom }
 
 class _DeviceReport {
   final String name;
   final String room;
   final String type;
   final Map<String, double> dailyKwh; // "YYYY-MM-DD" -> kWh used that day
+  final Map<DateTime, double> hourlyKwh; // start of the hour (local) -> kWh used in it
 
   const _DeviceReport({
     required this.name,
     required this.room,
     required this.type,
     required this.dailyKwh,
+    required this.hourlyKwh,
   });
 }
 
@@ -119,17 +122,45 @@ class _ReportPageState extends State<ReportPage> {
             if (value is num) dailyKwh[key.toString()] = value.toDouble();
           });
 
+          final hourlyKwh = _parseHourly(data['hourly']);
+
           setState(() {
             _devices[id] = _DeviceReport(
               name: (info['name'] as String?) ?? 'Unnamed',
               room: (info['room'] as String?) ?? '',
               type: (info['type'] as String?) ?? 'Other',
               dailyKwh: dailyKwh,
+              hourlyKwh: hourlyKwh,
             );
           });
         });
       }
     });
+  }
+
+  /// devices/{id}/hourly/{YYYY-MM-DD}/{HH} -> kWh, written by the plug
+  /// firmware. Hour keys "00".."23" can come back from the database as a
+  /// list (index = hour) rather than a map, so both shapes are handled.
+  static Map<DateTime, double> _parseHourly(Object? raw) {
+    final result = <DateTime, double>{};
+    if (raw is! Map) return result;
+    raw.forEach((dateKey, hours) {
+      final date = DateTime.tryParse(dateKey.toString());
+      if (date == null) return;
+      void add(int? hour, Object? value) {
+        if (hour == null || hour < 0 || hour > 23 || value is! num) return;
+        result[DateTime(date.year, date.month, date.day, hour)] = value.toDouble();
+      }
+
+      if (hours is Map) {
+        hours.forEach((h, v) => add(int.tryParse(h.toString()), v));
+      } else if (hours is List) {
+        for (int h = 0; h < hours.length; h++) {
+          add(h, hours[h]);
+        }
+      }
+    });
+    return result;
   }
 
   @override
@@ -145,14 +176,26 @@ class _ReportPageState extends State<ReportPage> {
   // ===============================================================
   // TIME BUCKETING — turns the selected filter into a list of date
   // ranges to sum history against. Each device only stores one kWh
-  // number per calendar day, so anything finer than a day isn't
-  // derivable — "Day" shows the last 7 individual days.
+  // number per calendar day in history/, plus one per hour in hourly/
+  // for "Hour". "Day" shows the last 7 individual days.
   // ===============================================================
   List<_Bucket> _buckets() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
     switch (_range) {
+      case _ReportRange.hour:
+        // Today, midnight to midnight, one bar per hour. Only every third
+        // hour is labelled so 24 labels don't run into each other.
+        return List.generate(24, (h) {
+          final start = DateTime(today.year, today.month, today.day, h);
+          return _Bucket(
+            label: h % 3 == 0 ? _hourLabel(h) : "",
+            start: start,
+            end: start.add(const Duration(hours: 1)),
+          );
+        });
+
       case _ReportRange.day:
         return List.generate(7, (i) {
           final d = today.subtract(Duration(days: 6 - i));
@@ -185,6 +228,11 @@ class _ReportPageState extends State<ReportPage> {
     }
   }
 
+  static String _hourLabel(int hour) {
+    final h = hour % 12 == 0 ? 12 : hour % 12;
+    return "$h${hour < 12 ? 'a' : 'p'}";
+  }
+
   static String _weekdayLabel(int weekday) {
     const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     return labels[weekday - 1];
@@ -196,6 +244,15 @@ class _ReportPageState extends State<ReportPage> {
   }
 
   double _kwhForDevice(_DeviceReport device, DateTime start, DateTime end) {
+    // The Hour view sums the hourly log; every other view the daily one.
+    if (_range == _ReportRange.hour) {
+      double total = 0;
+      device.hourlyKwh.forEach((hourStart, kwh) {
+        if (!hourStart.isBefore(start) && hourStart.isBefore(end)) total += kwh;
+      });
+      return total;
+    }
+
     double total = 0;
     device.dailyKwh.forEach((dateStr, kwh) {
       final date = DateTime.tryParse(dateStr);
@@ -325,8 +382,7 @@ class _ReportPageState extends State<ReportPage> {
     final maxBucket = bucketTotals.fold<double>(0, (a, b) => a > b ? a : b);
     final axisMax = _niceAxisMax(maxBucket);
 
-    final today = DateTime.now();
-    final todayDate = DateTime(today.year, today.month, today.day);
+    final now = DateTime.now();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -347,35 +403,70 @@ class _ReportPageState extends State<ReportPage> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          "Energy Report",
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1F2937),
+                        // Expanded so the longer title wraps on narrow
+                        // phones instead of pushing the buttons off-screen.
+                        const Expanded(
+                          child: Text(
+                            "Energy Consumption Report",
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1F2937),
+                            ),
                           ),
                         ),
-                        InkWell(
-                          borderRadius: BorderRadius.circular(17),
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("Export not wired up yet")),
-                            );
-                          },
-                          child: Container(
-                            width: 34,
-                            height: 34,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFFE5E7EB)),
+                        const SizedBox(width: 8),
+                        Row(
+                          children: [
+                            // Same rate editor as Home. Members share the
+                            // admin's rate but can't change it.
+                            if (_session?.canEditRate ?? false) ...[
+                              InkWell(
+                                borderRadius: BorderRadius.circular(17),
+                                onTap: () => showEditRateDialog(context, _session!.householdUid, _pesoPerKwh),
+                                child: Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                                  ),
+                                  child: const Tooltip(
+                                    message: "Edit electricity rate",
+                                    child: Icon(
+                                      Icons.payments_outlined,
+                                      size: 18,
+                                      color: Color(0xFF0F766E),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            InkWell(
+                              borderRadius: BorderRadius.circular(17),
+                              onTap: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text("Export not wired up yet")),
+                                );
+                              },
+                              child: Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                                ),
+                                child: const Icon(
+                                  Icons.file_download_outlined,
+                                  size: 18,
+                                  color: Color(0xFF0F766E),
+                                ),
+                              ),
                             ),
-                            child: const Icon(
-                              Icons.file_download_outlined,
-                              size: 18,
-                              color: Color(0xFF0F766E),
-                            ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
@@ -389,13 +480,15 @@ class _ReportPageState extends State<ReportPage> {
                       height: 34,
                       child: Row(
                         children: [
+                          _filterTab("Hour", _ReportRange.hour),
+                          const SizedBox(width: 6),
                           _filterTab("Day", _ReportRange.day),
                           const SizedBox(width: 6),
                           _filterTab("Week", _ReportRange.week),
                           const SizedBox(width: 6),
                           _filterTab("Month", _ReportRange.month),
                           const SizedBox(width: 6),
-                          _filterTab("Custom", _ReportRange.custom, onCustomTap: _pickCustomRange),
+                          _filterTab("Date Range", _ReportRange.custom, onCustomTap: _pickCustomRange),
                         ],
                       ),
                     ),
@@ -453,13 +546,17 @@ class _ReportPageState extends State<ReportPage> {
                                     crossAxisAlignment: CrossAxisAlignment.end,
                                     children: List.generate(buckets.length, (i) {
                                       final bucket = buckets[i];
-                                      final isToday = !todayDate.isBefore(bucket.start) &&
-                                          todayDate.isBefore(bucket.end);
+                                      // The bar for the current hour/day/week/month.
+                                      final isToday = !now.isBefore(bucket.start) &&
+                                          now.isBefore(bucket.end);
                                       return _reportBar(
                                         label: bucket.label,
                                         value: bucketTotals[i],
                                         axisMax: axisMax,
                                         highlighted: isToday,
+                                        // 24 hourly bars need to be thinner to
+                                        // leave a gap between them.
+                                        barWidth: _range == _ReportRange.hour ? 7 : 14,
                                       );
                                     }),
                                   ),
@@ -677,6 +774,7 @@ class _ReportPageState extends State<ReportPage> {
     required double value,
     required double axisMax,
     required bool highlighted,
+    double barWidth = 14,
   }) {
     const maxPixelHeight = 128.0;
     final height =
@@ -687,7 +785,7 @@ class _ReportPageState extends State<ReportPage> {
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Container(
-            width: 14,
+            width: barWidth,
             height: height,
             decoration: BoxDecoration(
               color: highlighted ? const Color(0xFFF59E0B) : const Color(0xFF0F766E),
