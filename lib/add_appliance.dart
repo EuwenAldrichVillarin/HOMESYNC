@@ -196,7 +196,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
         _customBrandController.clear();
       }
       _selectedType = type;
-      _applyDefaultWattsFor(type);
+      _applySuggestedLimits();
     });
   }
 
@@ -208,14 +208,60 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
       ? _customRoomController.text.trim()
       : (_selectedRoom ?? '');
 
-  /// Pre-fills the power ceiling when a type is chosen on a new
-  /// appliance. A limit nobody sets is a limit that never fires, so the
-  /// form starts from a plausible number rather than an empty box —
-  /// while leaving anything the user has already typed alone.
-  void _applyDefaultWattsFor(ApplianceType type) {
-    if (_maxWattsController.text.trim().isNotEmpty) return;
-    final suggested = kDefaultMaxWatts[type.label];
-    if (suggested != null) _maxWattsController.text = suggested.toString();
+  // What the limit boxes were last auto-filled with. A box still holding
+  // exactly this (or empty) hasn't been touched by the user, so it's
+  // safe to replace when the type or brand changes; anything else is the
+  // user's own number and is left alone.
+  String? _autoFilledWatts;
+  String? _autoFilledKwh;
+
+  /// The estimate for the current type + brand. "Other" brands use the
+  /// type's general estimate.
+  SuggestedLimit? get _suggestedLimit => suggestedLimitFor(
+        _selectedType?.label,
+        _selectedBrand == kOtherOption ? null : _selectedBrand,
+      );
+
+  /// Fills the alert boxes with the estimate for the current type and
+  /// brand. A limit nobody sets is a limit that never fires, so the form
+  /// starts from a plausible number rather than an empty box — while
+  /// keeping any number the user typed themselves.
+  void _applySuggestedLimits() {
+    final suggestion = _suggestedLimit;
+    if (suggestion == null) return;
+
+    final watts = suggestion.maxWatts.toString();
+    final kwh = _formatKwh(suggestion.maxDailyKwh);
+
+    final wattsText = _maxWattsController.text.trim();
+    if (wattsText.isEmpty || wattsText == _autoFilledWatts) {
+      _maxWattsController.text = watts;
+      _autoFilledWatts = watts;
+    }
+
+    final kwhText = _maxDailyKwhController.text.trim();
+    if (kwhText.isEmpty || kwhText == _autoFilledKwh) {
+      _maxDailyKwhController.text = kwh;
+      _autoFilledKwh = kwh;
+    }
+  }
+
+  String _formatKwh(double value) =>
+      value == value.roundToDouble() ? value.toStringAsFixed(0) : value.toString();
+
+  /// "Suggested for Daikin Aircon: 1,600 W · 12 kWh/day" under the boxes,
+  /// so the estimate stays visible even after the user changes a number.
+  String? get _suggestionHint {
+    final suggestion = _suggestedLimit;
+    final type = _selectedType;
+    if (suggestion == null || type == null) return null;
+    final brand = (_selectedBrand == null || _selectedBrand == kOtherOption) ? null : _selectedBrand;
+    final watts = suggestion.maxWatts.toString().replaceAllMapped(
+          RegExp(r'(\d)(?=(\d{3})+$)'),
+          (m) => '${m[1]},',
+        );
+    final label = brand == null ? type.label : "$brand ${type.label}";
+    return "Suggested for $label: $watts W · ${_formatKwh(suggestion.maxDailyKwh)} kWh/day";
   }
 
   /// Parses a limit box. Empty means "no limit", which is written as null
@@ -726,6 +772,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                             : (value) => setState(() {
                                   _selectedBrand = value;
                                   if (value != kOtherOption) _customBrandController.clear();
+                                  _applySuggestedLimits();
                                 }),
                         validator: (value) {
                           if (_selectedType == null) return "Select an appliance type first";
@@ -875,6 +922,26 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                           ),
                         ],
                       ),
+
+                      if (_suggestionHint != null) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.only(top: 1),
+                              child: Icon(Icons.info_outline, size: 14, color: Color(0xFF0F766E)),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                _suggestionHint!,
+                                style: const TextStyle(fontSize: 11, color: Color(0xFF0F766E)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
 
                       const SizedBox(height: 40),
 
