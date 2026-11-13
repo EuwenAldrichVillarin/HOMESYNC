@@ -554,6 +554,9 @@ class _ReportPageState extends State<ReportPage> {
                                         value: bucketTotals[i],
                                         axisMax: axisMax,
                                         highlighted: isToday,
+                                        // 24 hourly bars need to be thinner to
+                                        // leave a gap between them.
+                                        barWidth: _range == _ReportRange.hour ? 7 : 14,
                                       );
                                     }),
                                   ),
@@ -771,6 +774,7 @@ class _ReportPageState extends State<ReportPage> {
     required double value,
     required double axisMax,
     required bool highlighted,
+    double barWidth = 14,
   }) {
     const maxPixelHeight = 128.0;
     final height =
@@ -781,7 +785,7 @@ class _ReportPageState extends State<ReportPage> {
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Container(
-            width: 14,
+            width: barWidth,
             height: height,
             decoration: BoxDecoration(
               color: highlighted ? const Color(0xFFF59E0B) : const Color(0xFF0F766E),
