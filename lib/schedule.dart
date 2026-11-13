@@ -6,6 +6,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'household.dart';
 import 'activity.dart';
 import 'members.dart';
+import 'app_nav_bar.dart';
 
 // =====================================================================
 // SCHEDULES
@@ -582,38 +583,7 @@ class _SchedulePageState extends State<SchedulePage> {
       // =================================================
       // BOTTOM NAVIGATION
       // =================================================
-      bottomNavigationBar: Container(
-        height: 66,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Color(0xFFF1F5F9))),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _bottomItem(
-              icon: Icons.home,
-              label: "Home",
-              selected: false,
-              onTap: () => Navigator.pushReplacementNamed(context, '/home'),
-            ),
-            _bottomItem(
-              icon: Icons.power,
-              label: "Appliances",
-              selected: false,
-              onTap: () => Navigator.pushReplacementNamed(context, '/appliances'),
-            ),
-            if (session.canViewReports)
-              _bottomItem(
-                icon: Icons.show_chart,
-                label: "Report",
-                selected: false,
-                onTap: () => Navigator.pushReplacementNamed(context, '/report'),
-              ),
-            _bottomItem(icon: Icons.access_time, label: "Schedule", selected: true, onTap: () {}),
-          ],
-        ),
-      ),
+      bottomNavigationBar: AppNavBar(current: AppTab.schedule, showReports: session.canViewReports),
     );
   }
 
@@ -806,36 +776,6 @@ class _SchedulePageState extends State<SchedulePage> {
           fontSize: 10,
           fontWeight: FontWeight.bold,
           color: on ? Colors.white : _kFaint,
-        ),
-      ),
-    );
-  }
-
-  static Widget _bottomItem({
-    required IconData icon,
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    final color = selected ? _kTeal : _kFaint;
-    return InkWell(
-      onTap: onTap,
-      child: SizedBox(
-        width: 70,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 23, color: color),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: selected ? FontWeight.bold : FontWeight.w600,
-                color: color,
-              ),
-            ),
-          ],
         ),
       ),
     );

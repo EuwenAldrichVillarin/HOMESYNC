@@ -6,6 +6,7 @@ import 'add_appliance.dart';
 import 'household.dart';
 import 'activity.dart';
 import 'members.dart';
+import 'app_nav_bar.dart';
 
 class AppliancesPage extends StatefulWidget {
   const AppliancesPage({super.key});
@@ -336,42 +337,7 @@ class _AppliancesPageState extends State<AppliancesPage> {
       // ===========================================================
       // BOTTOM NAVIGATION
       // ===========================================================
-      bottomNavigationBar: Container(
-        height: 68,
-        decoration: const BoxDecoration(color: Colors.white),
-
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _bottomItem(
-              icon: Icons.home,
-              label: "Home",
-              selected: false,
-              onTap: () => Navigator.pushReplacementNamed(context, '/home'),
-            ),
-            _bottomItem(
-              icon: Icons.power,
-              label: "Appliances",
-              selected: true,
-              onTap: () {},
-            ),
-            if (session?.canViewReports ?? true)
-              _bottomItem(
-                icon: Icons.show_chart,
-                label: "Report",
-                selected: false,
-                onTap: () => Navigator.pushReplacementNamed(context, '/report'),
-              ),
-            _bottomItem(
-              icon: Icons.access_time_filled,
-              label: "Schedule",
-              selected: false,
-              onTap: () =>
-                  Navigator.pushReplacementNamed(context, '/schedule'),
-            ),
-          ],
-        ),
-      ),
+      bottomNavigationBar: AppNavBar(current: AppTab.appliances, showReports: session?.canViewReports ?? true),
     );
   }
 
@@ -510,45 +476,6 @@ class _AppliancesPageState extends State<AppliancesPage> {
             fontWeight: FontWeight.w600,
             color: selected ? Colors.white : const Color(0xFF6B7280),
           ),
-        ),
-      ),
-    );
-  }
-
-  // =============================================================
-  // BOTTOM NAV ITEM
-  // =============================================================
-  Widget _bottomItem({
-    required IconData icon,
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: SizedBox(
-        width: 70,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 25,
-              color:
-                  selected ? const Color(0xFF0F766E) : const Color(0xFF94A3B8),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: selected ? FontWeight.bold : FontWeight.w600,
-                color: selected
-                    ? const Color(0xFF0F766E)
-                    : const Color(0xFF94A3B8),
-              ),
-            ),
-          ],
         ),
       ),
     );

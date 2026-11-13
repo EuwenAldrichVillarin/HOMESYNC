@@ -1,11 +1,11 @@
 {
-    "name": "demo",
-    "short_name": "demo",
+    "name": "HomeSync",
+    "short_name": "HomeSync",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#1A7F72",
+    "theme_color": "#1A7F72",
+    "description": "Smart energy, smarter living.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

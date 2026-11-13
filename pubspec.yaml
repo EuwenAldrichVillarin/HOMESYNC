@@ -42,6 +42,8 @@ dependencies:
   firebase_database: ^12.5.0
   image_picker: ^1.2.3
   image: ^4.10.1
+  share_plus: ^13.3.1
+  pdf: ^3.13.1
 
 dev_dependencies:
   flutter_test:
@@ -53,6 +55,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -63,6 +66,9 @@ flutter:
 
   assets:
     - assets/
+    # Embedded in exported PDF reports. The PDF's built-in fonts have no
+    # peso sign (₱); Roboto (Apache 2.0) does.
+    - assets/fonts/
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
@@ -98,3 +104,29 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# App icon for every platform. Regenerate after changing the artwork with:
+#   dart run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: "assets/icon/app_icon.png"
+  android: true
+  # Android 8+ masks icons into a circle/squircle; the teal fills the
+  # area around the inset artwork so the mask never shows a white edge.
+  adaptive_icon_background: "#1A7F72"
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  adaptive_icon_foreground_inset: 12
+  ios: true
+  remove_alpha_ios: true
+  background_color_ios: "#1A7F72"
+  web:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    background_color: "#1A7F72"
+    theme_color: "#1A7F72"
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/icon/app_icon.png"

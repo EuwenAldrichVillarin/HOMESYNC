@@ -206,10 +206,12 @@ class _LoginPageState extends State<LoginPage> {
       body: Column(
         children: [
 
-          // GREEN HEADER
+          // GREEN HEADER — the gradient runs up behind the status bar,
+          // but the logo and text are pushed below it.
           Container(
             width: double.infinity,
-            height: 250,
+            height: 250 + MediaQuery.paddingOf(context).top,
+            padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
 
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -288,11 +290,13 @@ class _LoginPageState extends State<LoginPage> {
 
               child: SingleChildScrollView(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
+                  // Bottom grows by the system inset so the last row can
+                  // scroll clear of on-screen nav buttons.
+                  padding: EdgeInsets.fromLTRB(
                     32,
                     20,
                     32,
-                    20,
+                    20 + MediaQuery.paddingOf(context).bottom,
                   ),
 
                   child: Column(

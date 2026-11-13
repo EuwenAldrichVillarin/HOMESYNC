@@ -2,10 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'household.dart';
 import 'rate_dialog.dart';
 import 'members.dart';
+import 'app_nav_bar.dart';
+import 'report_pdf.dart';
 
 // Fallback used until users/{uid}/settings/pesoPerKwh loads (or if it was
 // never set). Editable from the rate button on Home and on this screen.
@@ -30,11 +33,12 @@ class _DeviceReport {
 }
 
 class _Bucket {
-  final String label;
+  final String label; // short x-axis text under the bar
+  final String detail; // longer text shown in the bar's tooltip
   final DateTime start; // inclusive
   final DateTime end; // exclusive
 
-  const _Bucket({required this.label, required this.start, required this.end});
+  const _Bucket({required this.label, required this.detail, required this.start, required this.end});
 }
 
 class ReportPage extends StatefulWidget {
@@ -59,6 +63,7 @@ class _ReportPageState extends State<ReportPage> {
   _ReportRange _range = _ReportRange.day;
   DateTimeRange? _customRange;
   double _pesoPerKwh = _kDefaultPesoPerKwh;
+  bool _exporting = false;
 
   HouseholdSession? _session;
   StreamSubscription<DatabaseEvent>? _appliancesSub;
@@ -185,12 +190,13 @@ class _ReportPageState extends State<ReportPage> {
 
     switch (_range) {
       case _ReportRange.hour:
-        // Today, midnight to midnight, one bar per hour. Only every third
-        // hour is labelled so 24 labels don't run into each other.
+        // Today, midnight to midnight, one bar per hour. Every hour is
+        // labelled; the chart turns the labels sideways so they fit.
         return List.generate(24, (h) {
           final start = DateTime(today.year, today.month, today.day, h);
           return _Bucket(
-            label: h % 3 == 0 ? _hourLabel(h) : "",
+            label: _hourLabel(h),
+            detail: "${_hourLabel(h)} – ${_hourLabel((h + 1) % 24)}",
             start: start,
             end: start.add(const Duration(hours: 1)),
           );
@@ -199,21 +205,37 @@ class _ReportPageState extends State<ReportPage> {
       case _ReportRange.day:
         return List.generate(7, (i) {
           final d = today.subtract(Duration(days: 6 - i));
-          return _Bucket(label: _weekdayLabel(d.weekday), start: d, end: d.add(const Duration(days: 1)));
+          return _Bucket(
+            label: _weekdayLabel(d.weekday),
+            detail: "${_weekdayLabel(d.weekday)}, ${_dateLabel(d)}",
+            start: d,
+            end: d.add(const Duration(days: 1)),
+          );
         });
 
       case _ReportRange.week:
         final startOfThisWeek = today.subtract(Duration(days: today.weekday - 1));
         return List.generate(6, (i) {
           final start = startOfThisWeek.subtract(Duration(days: 7 * (5 - i)));
-          return _Bucket(label: "W${i + 1}", start: start, end: start.add(const Duration(days: 7)));
+          final end = start.add(const Duration(days: 7));
+          return _Bucket(
+            label: _dateLabel(start),
+            detail: "${_dateLabel(start)} – ${_dateLabel(end.subtract(const Duration(days: 1)))}",
+            start: start,
+            end: end,
+          );
         });
 
       case _ReportRange.month:
         return List.generate(6, (i) {
           final monthStart = DateTime(today.year, today.month - (5 - i), 1);
           final nextMonth = DateTime(monthStart.year, monthStart.month + 1, 1);
-          return _Bucket(label: _monthLabel(monthStart.month), start: monthStart, end: nextMonth);
+          return _Bucket(
+            label: _monthLabel(monthStart.month),
+            detail: "${_monthLabel(monthStart.month)} ${monthStart.year}",
+            start: monthStart,
+            end: nextMonth,
+          );
         });
 
       case _ReportRange.custom:
@@ -223,14 +245,68 @@ class _ReportPageState extends State<ReportPage> {
         final dayCount = (end.difference(start).inDays + 1).clamp(1, 31).toInt();
         return List.generate(dayCount, (i) {
           final d = start.add(Duration(days: i));
-          return _Bucket(label: "${d.day}", start: d, end: d.add(const Duration(days: 1)));
+          return _Bucket(label: "${d.day}", detail: _dateLabel(d), start: d, end: d.add(const Duration(days: 1)));
         });
     }
   }
 
   static String _hourLabel(int hour) {
     final h = hour % 12 == 0 ? 12 : hour % 12;
-    return "$h${hour < 12 ? 'a' : 'p'}";
+    return "$h${hour < 12 ? 'am' : 'pm'}";
+  }
+
+  static String _dateLabel(DateTime d) => "${_monthLabel(d.month)} ${d.day}";
+
+  // Chart captions for each filter.
+  String get _chartSubtitle {
+    switch (_range) {
+      case _ReportRange.hour:
+        return "Today, by hour";
+      case _ReportRange.day:
+        return "Last 7 days";
+      case _ReportRange.week:
+        return "Last 6 weeks";
+      case _ReportRange.month:
+        return "Last 6 months";
+      case _ReportRange.custom:
+        return "Selected dates (up to 31 days)";
+    }
+  }
+
+  String get _xAxisTitle {
+    switch (_range) {
+      case _ReportRange.hour:
+        return "Time of day";
+      case _ReportRange.day:
+        return "Day";
+      case _ReportRange.week:
+        return "Week starting";
+      case _ReportRange.month:
+        return "Month";
+      case _ReportRange.custom:
+        return "Day of month";
+    }
+  }
+
+  String get _currentLegend {
+    switch (_range) {
+      case _ReportRange.hour:
+        return "This hour";
+      case _ReportRange.week:
+        return "This week";
+      case _ReportRange.month:
+        return "This month";
+      case _ReportRange.day:
+      case _ReportRange.custom:
+        return "Today";
+    }
+  }
+
+  static String _kwhLabel(double v) {
+    if (v <= 0) return "0";
+    if (v < 1) return v.toStringAsFixed(2);
+    if (v < 100) return v.toStringAsFixed(1);
+    return v.toStringAsFixed(0);
   }
 
   static String _weekdayLabel(int weekday) {
@@ -299,6 +375,84 @@ class _ReportPageState extends State<ReportPage> {
       buffer.write(digits[i]);
     }
     return (rounded < 0 ? '-' : '') + buffer.toString();
+  }
+
+  // ===============================================================
+  // EXPORT — turns exactly what the screen is showing for the current
+  // filter (summary, the chart's buckets, the per-appliance breakdown)
+  // into a PDF and hands it to the platform share sheet. On web, where
+  // file sharing is often unsupported, share_plus downloads it instead.
+  // ===============================================================
+  Future<void> _exportPdf(
+    BuildContext buttonContext, {
+    required List<_Bucket> buckets,
+    required List<double> bucketTotals,
+    required double totalKwh,
+    required double? changePct,
+    required List<MapEntry<_DeviceReport, double>> breakdown,
+  }) async {
+    final box = buttonContext.findRenderObject() as RenderBox?;
+    final origin = box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+    final messenger = ScaffoldMessenger.of(context);
+
+    final now = DateTime.now();
+    final periodStart = buckets.first.start;
+    final lastDay = buckets.last.end.subtract(const Duration(days: 1));
+    final periodText = _range == _ReportRange.hour
+        ? _longDate(periodStart)
+        : "${_longDate(periodStart)} – ${_longDate(lastDay)}";
+
+    final data = ReportPdfData(
+      rangeTitle: _chartSubtitle,
+      periodText: periodText,
+      generatedText: "${_longDate(now)}, ${_clockLabel(now)}",
+      xAxisTitle: _xAxisTitle,
+      currentLegend: _currentLegend,
+      pesoPerKwh: _pesoPerKwh,
+      totalKwh: totalKwh,
+      changePct: changePct,
+      bars: [
+        for (int i = 0; i < buckets.length; i++)
+          ReportPdfBar(
+            label: buckets[i].label,
+            detail: buckets[i].detail,
+            kwh: bucketTotals[i],
+            highlighted: !now.isBefore(buckets[i].start) && now.isBefore(buckets[i].end),
+          ),
+      ],
+      appliances: [
+        for (final entry in breakdown)
+          ReportPdfAppliance(name: entry.key.name, room: entry.key.room, type: entry.key.type, kwh: entry.value),
+      ],
+    );
+    final fileName = "homesync-report-${_range.name}-${_isoDate(now)}.pdf";
+
+    setState(() => _exporting = true);
+    try {
+      final bytes = await buildReportPdf(data);
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile.fromData(bytes, mimeType: 'application/pdf', name: fileName)],
+          fileNameOverrides: [fileName],
+          subject: "HomeSync energy report",
+          sharePositionOrigin: origin,
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text("Couldn't export the report: $e")));
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  static String _longDate(DateTime d) => "${_monthLabel(d.month)} ${d.day}, ${d.year}";
+
+  static String _isoDate(DateTime d) =>
+      "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+
+  static String _clockLabel(DateTime d) {
+    final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    return "$h:${d.minute.toString().padLeft(2, '0')} ${d.hour < 12 ? 'am' : 'pm'}";
   }
 
   Future<void> _pickCustomRange() async {
@@ -383,6 +537,8 @@ class _ReportPageState extends State<ReportPage> {
     final axisMax = _niceAxisMax(maxBucket);
 
     final now = DateTime.now();
+    // Hourly and long custom ranges have too many bars for flat labels.
+    final dense = buckets.length > 12;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -444,25 +600,45 @@ class _ReportPageState extends State<ReportPage> {
                               ),
                               const SizedBox(width: 8),
                             ],
-                            InkWell(
-                              borderRadius: BorderRadius.circular(17),
-                              onTap: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text("Export not wired up yet")),
-                                );
-                              },
-                              child: Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: const Color(0xFFE5E7EB)),
-                                ),
-                                child: const Icon(
-                                  Icons.file_download_outlined,
-                                  size: 18,
-                                  color: Color(0xFF0F766E),
+                            // Builder so the share sheet can anchor to this
+                            // button on iPad, which requires an origin.
+                            Builder(
+                              builder: (buttonContext) => InkWell(
+                                borderRadius: BorderRadius.circular(17),
+                                onTap: _exporting
+                                    ? null
+                                    : () => _exportPdf(
+                                          buttonContext,
+                                          buckets: buckets,
+                                          bucketTotals: bucketTotals,
+                                          totalKwh: totalKwh,
+                                          changePct: changePct,
+                                          breakdown: breakdown,
+                                        ),
+                                child: Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                                  ),
+                                  child: Tooltip(
+                                    message: "Export report (PDF)",
+                                    child: _exporting
+                                        ? const Padding(
+                                            padding: EdgeInsets.all(9),
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Color(0xFF0F766E),
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.file_download_outlined,
+                                            size: 18,
+                                            color: Color(0xFF0F766E),
+                                          ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -509,7 +685,6 @@ class _ReportPageState extends State<ReportPage> {
                     // =========================================
                     Container(
                       width: double.infinity,
-                      height: 170,
                       padding: const EdgeInsets.fromLTRB(10, 12, 10, 8),
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -517,17 +692,75 @@ class _ReportPageState extends State<ReportPage> {
                         border: Border.all(color: const Color(0xFFE5E7EB)),
                       ),
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
 
-                                // Y-AXIS LABELS
-                                SizedBox(
-                                  width: 22,
+                          // TITLE + LEGEND
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      "Energy Usage (kWh)",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF1F2937),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _chartSubtitle,
+                                      style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              _legendItem(const Color(0xFFF59E0B), _currentLegend),
+                              const SizedBox(width: 8),
+                              _legendItem(const Color(0xFF0F766E), "Earlier"),
+                            ],
+                          ),
+
+                          const SizedBox(height: 10),
+
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+
+                              // Y-AXIS TITLE
+                              SizedBox(
+                                height: _valueLabelHeight(dense) + _kBarAreaHeight,
+                                child: const RotatedBox(
+                                  quarterTurns: 3,
+                                  child: Center(
+                                    child: Text(
+                                      "kWh",
+                                      style: TextStyle(
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF64748B),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(width: 3),
+
+                              // Y-AXIS LABELS — spans exactly the bar area so
+                              // the top label lines up with a full-height bar.
+                              Padding(
+                                padding: EdgeInsets.only(top: _valueLabelHeight(dense) - 4),
+                                child: SizedBox(
+                                  width: 24,
+                                  height: _kBarAreaHeight + 8,
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    crossAxisAlignment: CrossAxisAlignment.end,
                                     children: List.generate(6, (i) {
                                       final v = axisMax * (5 - i) / 5;
                                       return Text(
@@ -537,31 +770,47 @@ class _ReportPageState extends State<ReportPage> {
                                     }),
                                   ),
                                 ),
+                              ),
 
-                                const SizedBox(width: 5),
+                              const SizedBox(width: 5),
 
-                                // BARS
-                                Expanded(
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: List.generate(buckets.length, (i) {
-                                      final bucket = buckets[i];
-                                      // The bar for the current hour/day/week/month.
-                                      final isToday = !now.isBefore(bucket.start) &&
-                                          now.isBefore(bucket.end);
-                                      return _reportBar(
-                                        label: bucket.label,
-                                        value: bucketTotals[i],
-                                        axisMax: axisMax,
-                                        highlighted: isToday,
-                                        // 24 hourly bars need to be thinner to
-                                        // leave a gap between them.
-                                        barWidth: _range == _ReportRange.hour ? 7 : 14,
-                                      );
-                                    }),
-                                  ),
+                              // BARS
+                              Expanded(
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: List.generate(buckets.length, (i) {
+                                    final bucket = buckets[i];
+                                    // The bar for the current hour/day/week/month.
+                                    final isToday = !now.isBefore(bucket.start) &&
+                                        now.isBefore(bucket.end);
+                                    return _reportBar(
+                                      label: bucket.label,
+                                      tooltip: "${bucket.detail}: ${_kwhLabel(bucketTotals[i])} kWh",
+                                      value: bucketTotals[i],
+                                      axisMax: axisMax,
+                                      highlighted: isToday,
+                                      dense: dense,
+                                      // Many bars need to be thinner to leave
+                                      // a gap between them.
+                                      barWidth: dense ? 7 : 14,
+                                    );
+                                  }),
                                 ),
-                              ],
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 4),
+
+                          // X-AXIS TITLE
+                          Center(
+                            child: Text(
+                              _xAxisTitle,
+                              style: const TextStyle(
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF64748B),
+                              ),
                             ),
                           ),
                         ],
@@ -702,39 +951,7 @@ class _ReportPageState extends State<ReportPage> {
       // ===================================================
       // BOTTOM NAVIGATION
       // ===================================================
-      bottomNavigationBar: Container(
-        height: 68,
-        decoration: const BoxDecoration(color: Colors.white),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _bottomItem(
-              icon: Icons.home,
-              label: "Home",
-              selected: false,
-              onTap: () => Navigator.pushReplacementNamed(context, '/home'),
-            ),
-            _bottomItem(
-              icon: Icons.power,
-              label: "Appliances",
-              selected: false,
-              onTap: () => Navigator.pushReplacementNamed(context, '/appliances'),
-            ),
-            _bottomItem(
-              icon: Icons.show_chart,
-              label: "Report",
-              selected: true,
-              onTap: () {},
-            ),
-            _bottomItem(
-              icon: Icons.access_time_filled,
-              label: "Schedule",
-              selected: false,
-              onTap: () => Navigator.pushReplacementNamed(context, '/schedule'),
-            ),
-          ],
-        ),
-      ),
+      bottomNavigationBar: const AppNavBar(current: AppTab.report),
     );
   }
 
@@ -769,39 +986,83 @@ class _ReportPageState extends State<ReportPage> {
   // ===============================================================
   // REPORT BAR
   // ===============================================================
+  static const double _kBarAreaHeight = 128;
+
+  // Room above the bar for its value; taller when the value is turned
+  // sideways on dense charts.
+  static double _valueLabelHeight(bool dense) => dense ? 24 : 12;
+
   static Widget _reportBar({
     required String label,
+    required String tooltip,
     required double value,
     required double axisMax,
     required bool highlighted,
+    required bool dense,
     double barWidth = 14,
   }) {
-    const maxPixelHeight = 128.0;
     final height =
-        axisMax <= 0 ? 2.0 : (value / axisMax * maxPixelHeight).clamp(2.0, maxPixelHeight).toDouble();
+        axisMax <= 0 ? 2.0 : (value / axisMax * _kBarAreaHeight).clamp(2.0, _kBarAreaHeight).toDouble();
+    final color = highlighted ? const Color(0xFFF59E0B) : const Color(0xFF0F766E);
+
+    Widget sideways(Widget child) => dense ? RotatedBox(quarterTurns: 3, child: child) : child;
 
     return Expanded(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Container(
-            width: barWidth,
-            height: height,
-            decoration: BoxDecoration(
-              color: highlighted ? const Color(0xFFF59E0B) : const Color(0xFF0F766E),
+      child: Tooltip(
+        message: tooltip,
+        child: Column(
+          children: [
+            SizedBox(
+              height: _valueLabelHeight(dense) + _kBarAreaHeight,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (value > 0)
+                    sideways(
+                      Text(
+                        _kwhLabel(value),
+                        maxLines: 1,
+                        softWrap: false,
+                        style: TextStyle(fontSize: 6, fontWeight: FontWeight.w600, color: color),
+                      ),
+                    ),
+                  const SizedBox(height: 2),
+                  Container(width: barWidth, height: height, color: color),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 7,
-              fontWeight: highlighted ? FontWeight.bold : FontWeight.normal,
-              color: highlighted ? const Color(0xFFF59E0B) : const Color(0xFF64748B),
+            // Baseline under the bars.
+            Container(height: 1, color: const Color(0xFFE5E7EB)),
+            const SizedBox(height: 4),
+            SizedBox(
+              height: dense ? 22 : 10,
+              child: sideways(
+                Text(
+                  label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    fontSize: 7,
+                    fontWeight: highlighted ? FontWeight.bold : FontWeight.normal,
+                    color: highlighted ? const Color(0xFFF59E0B) : const Color(0xFF64748B),
+                  ),
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+
+  static Widget _legendItem(Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 8, height: 8, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(fontSize: 8, color: Color(0xFF64748B))),
+      ],
     );
   }
 
@@ -879,38 +1140,6 @@ class _ReportPageState extends State<ReportPage> {
             style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
           ),
         ],
-      ),
-    );
-  }
-
-  // ===============================================================
-  // BOTTOM NAV ITEM
-  // ===============================================================
-  Widget _bottomItem({
-    required IconData icon,
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: SizedBox(
-        width: 70,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 25, color: selected ? const Color(0xFF0F766E) : const Color(0xFF94A3B8)),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: selected ? FontWeight.bold : FontWeight.w600,
-                color: selected ? const Color(0xFF0F766E) : const Color(0xFF94A3B8),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

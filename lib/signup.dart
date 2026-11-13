@@ -209,10 +209,12 @@ class _SignUpPageState extends State<SignUpPage> {
       body: Column(
         children: [
 
-          // GREEN HEADER
+          // GREEN HEADER — the gradient runs up behind the status bar,
+          // but the logo and text are pushed below it.
           Container(
             width: double.infinity,
-            height: 200,
+            height: 200 + MediaQuery.paddingOf(context).top,
+            padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -259,7 +261,9 @@ class _SignUpPageState extends State<SignUpPage> {
                 borderRadius: BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
               ),
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(32, 24, 32, 20),
+                // Bottom grows by the system inset so the last row can
+                // scroll clear of on-screen nav buttons.
+                padding: EdgeInsets.fromLTRB(32, 24, 32, 20 + MediaQuery.paddingOf(context).bottom),
                 child: Form(
                   key: _formKey,
                   child: Column(

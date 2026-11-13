@@ -9,6 +9,7 @@ import 'rate_dialog.dart';
 import 'members.dart';
 import 'profile.dart';
 import 'activity.dart';
+import 'app_nav_bar.dart';
 
 const double _kDefaultPesoPerKwh = 11.0;
 
@@ -777,17 +778,43 @@ class _HomePageState extends State<HomePage> {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Container(
                   width: double.infinity,
-                  height: 150,
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: weeklyTotals.map((entry) {
-                      final isToday = entry.key == _weekdayLabel(today.weekday) &&
-                          weeklyTotals.last.key == entry.key;
-                      final height = (entry.value / weeklyAxisMax * 100).clamp(3.0, 100.0).toDouble();
-                      return _bar(entry.key, height, isToday);
-                    }).toList(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              "kWh used per day · last 7 days",
+                              style: TextStyle(fontSize: 9, color: Color(0xFF94A3B8)),
+                            ),
+                          ),
+                          Text(
+                            "Total ${weeklyTotals.fold<double>(0, (a, e) => a + e.value).toStringAsFixed(1)} kWh",
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF0F766E),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 132,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: weeklyTotals.map((entry) {
+                            // The last bar is always today.
+                            final isToday = identical(entry, weeklyTotals.last);
+                            final height = (entry.value / weeklyAxisMax * 100).clamp(3.0, 100.0).toDouble();
+                            return _bar(entry.key, entry.value, height, isToday);
+                          }).toList(),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -826,35 +853,7 @@ class _HomePageState extends State<HomePage> {
       // ===========================================================
       // 7. BOTTOM NAVIGATION
       // ===========================================================
-      bottomNavigationBar: Container(
-        height: 65,
-        decoration: const BoxDecoration(color: Colors.white),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _navItem(icon: Icons.home, label: "Home", selected: true, onTap: () {}),
-            _navItem(
-              icon: Icons.devices_other,
-              label: "Appliances",
-              selected: false,
-              onTap: () => Navigator.pushReplacementNamed(context, '/appliances'),
-            ),
-            if (session.canViewReports)
-              _navItem(
-                icon: Icons.bar_chart,
-                label: "Report",
-                selected: false,
-                onTap: () => Navigator.pushReplacementNamed(context, '/report'),
-              ),
-            _navItem(
-              icon: Icons.calendar_today,
-              label: "Schedule",
-              selected: false,
-              onTap: () => Navigator.pushReplacementNamed(context, '/schedule'),
-            ),
-          ],
-        ),
-      ),
+      bottomNavigationBar: AppNavBar(current: AppTab.home, showReports: session.canViewReports),
     );
   }
 
@@ -998,42 +997,24 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ===============================================================
-  // BOTTOM NAV ITEM
-  // ===============================================================
-  static Widget _navItem({
-    required IconData icon,
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    final color = selected ? const Color(0xFF0F766E) : const Color(0xFF94A3B8);
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 21, color: color),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(fontSize: 9, fontWeight: selected ? FontWeight.bold : FontWeight.normal, color: color),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ===============================================================
   // WEEKLY TREND BAR
   // ===============================================================
-  static Widget _bar(String day, double height, bool selected) {
+  static Widget _bar(String day, double kwh, double height, bool selected) {
     return Expanded(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
+          Text(
+            kwh <= 0 ? "0" : kwh.toStringAsFixed(kwh < 10 ? 1 : 0),
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              fontSize: 7,
+              fontWeight: FontWeight.w600,
+              color: selected ? const Color(0xFF0F766E) : const Color(0xFF64748B),
+            ),
+          ),
+          const SizedBox(height: 3),
           Container(
             width: 14,
             height: height,
@@ -1044,7 +1025,7 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 6),
           Text(
-            day,
+            selected ? "Today" : day,
             style: TextStyle(
               fontSize: 8,
               fontWeight: selected ? FontWeight.bold : FontWeight.normal,
