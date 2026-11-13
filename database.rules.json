@@ -23,6 +23,11 @@
           "$other": { ".validate": false }
         },
 
+        "wifiReset": {
+          ".write": "auth != null && (root.child('devices').child($deviceId).child('ownerId').val() == auth.uid || auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3')",
+          ".validate": "newData.isBoolean()"
+        },
+
         "command": {
           ".write": "auth != null && (root.child('devices').child($deviceId).child('ownerId').val() == auth.uid || (root.child('devices').child($deviceId).child('ownerId').isString() && root.child('users').child(root.child('devices').child($deviceId).child('ownerId').val()).child('members').child(auth.uid).child('permissions').child('control').val() == true))",
           "relay": { ".validate": "newData.isBoolean()" }

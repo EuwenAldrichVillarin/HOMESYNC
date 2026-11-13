@@ -116,9 +116,10 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
   String? _selectedRoom;
   bool _isSaving = false;
   bool _isRemoving = false;
+  bool _isResettingWifi = false;
   bool _isLoadingExisting = false;
 
-  bool get _isBusy => _isSaving || _isRemoving;
+  bool get _isBusy => _isSaving || _isRemoving || _isResettingWifi;
 
   bool get _isEditing => widget.editDeviceId != null;
 
@@ -457,6 +458,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
         'devices/$deviceId/info': null,
         'devices/$deviceId/schedule': null,
         'devices/$deviceId/limits': null,
+        'devices/$deviceId/wifiReset': null,
         'users/${user.uid}/appliances/$deviceId': null,
       });
 
@@ -471,6 +473,73 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
       if (!mounted) return;
       setState(() => _isRemoving = false);
       _showError("Couldn't remove the appliance: $e");
+    }
+  }
+
+  // ===============================================================
+  // RESET WIFI — tells the plug to forget its WiFi network and reopen
+  // its "HomeSync-XXXX" setup hotspot, e.g. after changing routers.
+  // The plug checks devices/{id}/wifiReset every ~10 seconds, clears it
+  // and restarts. It's offline until it's set up again on the hotspot,
+  // but it stays claimed, so nothing has to be re-added in the app.
+  // ===============================================================
+  Future<void> _handleResetWifi() async {
+    final deviceId = widget.editDeviceId;
+    if (deviceId == null) return;
+
+    final session = HouseholdSession.current;
+    if (session != null && !session.canManageAppliances) {
+      _showError("Only the household admin can reset an appliance's WiFi");
+      return;
+    }
+
+    final hotspot = "HomeSync-${deviceId.substring(deviceId.length - 4)}";
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          "Reset WiFi?",
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1F2937)),
+        ),
+        content: Text(
+          "The plug will forget its WiFi network and go offline. Within a few seconds it opens "
+          "a setup hotspot called \"$hotspot\".\n\n"
+          "Join that hotspot from your phone, tap \"Configure WiFi\", pick your network and enter "
+          "its password. The plug then reconnects and stays in your household.",
+          style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text("Cancel", style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F766E),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text("Reset WiFi"),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _isResettingWifi = true);
+    try {
+      await FirebaseDatabase.instance.ref('devices/$deviceId/wifiReset').set(true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Reset sent. Join \"$hotspot\" to connect it to the new network.")),
+      );
+    } catch (e) {
+      _showError("Couldn't reset WiFi: $e");
+    } finally {
+      if (mounted) setState(() => _isResettingWifi = false);
     }
   }
 
@@ -1007,6 +1076,38 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                       // =================================================
                       if (_isEditing) ...[
                         const SizedBox(height: 4),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 56,
+                          child: OutlinedButton.icon(
+                            onPressed: _isBusy ? null : _handleResetWifi,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF0F766E),
+                              side: const BorderSide(color: Color(0xFF99D5CF)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                            ),
+                            icon: _isResettingWifi
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      color: Color(0xFF0F766E),
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.wifi_off_outlined, size: 19),
+                            label: const Text(
+                              "Reset WiFi",
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
                           height: 56,
