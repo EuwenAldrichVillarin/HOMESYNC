@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      FACEBOOK LOGIN
+
+      Both values come from developers.facebook.com -> your app ->
+      Settings -> Basic. Replace the placeholders below; until you do,
+      the Facebook button will fail at login time.
+
+      Neither of these is a secret. They are compiled into the APK and
+      anyone can read them out of it, so they belong in version control.
+      The App *Secret* on that same page is a different thing entirely:
+      it goes into the Firebase console only, and must never appear in
+      this file or anywhere else in the app.
+    -->
+    <string name="facebook_app_id">1693090185754153</string>
+    <string name="facebook_client_token">a212fa43d3bbd0171cab26fe4c4af311</string>
+
+    <!--
+      Literally "fb" followed by the same App ID as above, with nothing
+      in between. This is the URL scheme Facebook uses to hand control
+      back to the app after login, and a mismatch here shows up as the
+      login sheet opening and then hanging forever.
+    -->
+    <string name="fb_login_protocol_scheme">fb1693090185754153</string>
+</resources>
