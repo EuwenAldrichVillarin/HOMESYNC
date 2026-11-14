@@ -26,7 +26,13 @@ const List<ApplianceType> kApplianceTypes = [
   ApplianceType("Washer", Icons.local_laundry_service),
   ApplianceType("Fan", Icons.mode_fan_off),
   ApplianceType("Heater", Icons.thermostat),
+  // Anything not listed. The user types what it is (saved as the type)
+  // and its brand; the plug icon matches how Home, Appliances and Report
+  // already show unknown types.
+  ApplianceType(kOtherOption, Icons.power),
 ];
+
+bool _isOtherType(ApplianceType? type) => type?.label == kOtherOption;
 
 /// Value used in the Brand and Room dropdowns for "not in the list".
 /// Picking it shows a text box so the user can type their own.
@@ -106,6 +112,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
   final _nameController = TextEditingController();
   final _customBrandController = TextEditingController();
   final _customRoomController = TextEditingController();
+  final _customTypeController = TextEditingController();
   final _maxWattsController = TextEditingController();
   final _maxDailyKwhController = TextEditingController();
 
@@ -150,17 +157,27 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
       final info = snapshot.value;
       if (info is Map) {
         _nameController.text = (info['name'] as String?) ?? '';
-        final typeLabel = info['type'] as String?;
+        final typeLabel = ((info['type'] as String?) ?? '').trim();
         _selectedType = kApplianceTypes.cast<ApplianceType?>().firstWhere(
               (t) => t?.label == typeLabel,
               orElse: () => null,
             );
+        // A custom type (typed via "Other") reopens as Other with its
+        // name filled in.
+        if (_selectedType == null && typeLabel.isNotEmpty) {
+          _selectedType = kApplianceTypes.firstWhere(_isOtherType);
+          _customTypeController.text = typeLabel;
+        }
 
         // A saved value that isn't in the list (typed via "Other", or
         // from before these were dropdowns) reopens as "Other" with the
         // text filled in, so nothing the user entered is lost.
         final brand = ((info['brand'] as String?) ?? '').trim();
-        if (brand.isNotEmpty && _selectedType != null) {
+        if (_isOtherType(_selectedType)) {
+          // No brand list for "Other" — the brand is always typed in.
+          _selectedBrand = kOtherOption;
+          _customBrandController.text = brand;
+        } else if (brand.isNotEmpty && _selectedType != null) {
           if (_brandsFor(_selectedType).contains(brand)) {
             _selectedBrand = brand;
           } else {
@@ -193,13 +210,19 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
   void _selectType(ApplianceType type) {
     setState(() {
       if (_selectedType != type) {
-        _selectedBrand = null;
+        // "Other" has no brand list, so its brand is always typed in.
+        _selectedBrand = _isOtherType(type) ? kOtherOption : null;
         _customBrandController.clear();
+        if (!_isOtherType(type)) _customTypeController.clear();
       }
       _selectedType = type;
       _applySuggestedLimits();
     });
   }
+
+  /// What gets saved as the type: the typed name for "Other".
+  String get _typeValue =>
+      _isOtherType(_selectedType) ? _customTypeController.text.trim() : _selectedType!.label;
 
   String get _brandValue => _selectedBrand == kOtherOption
       ? _customBrandController.text.trim()
@@ -229,10 +252,10 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
   /// keeping any number the user typed themselves.
   void _applySuggestedLimits() {
     final suggestion = _suggestedLimit;
-    if (suggestion == null) return;
-
-    final watts = suggestion.maxWatts.toString();
-    final kwh = _formatKwh(suggestion.maxDailyKwh);
+    // No estimate (e.g. "Other"): clear numbers that were only auto-filled
+    // for a previously picked type, and leave the user's own alone.
+    final watts = suggestion?.maxWatts.toString() ?? '';
+    final kwh = suggestion == null ? '' : _formatKwh(suggestion.maxDailyKwh);
 
     final wattsText = _maxWattsController.text.trim();
     if (wattsText.isEmpty || wattsText == _autoFilledWatts) {
@@ -281,6 +304,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
     _nameController.dispose();
     _customBrandController.dispose();
     _customRoomController.dispose();
+    _customTypeController.dispose();
     _maxWattsController.dispose();
     _maxDailyKwhController.dispose();
     super.dispose();
@@ -351,7 +375,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
           'devices/$deviceId/info': {
             'name': name,
             'room': room,
-            'type': _selectedType!.label,
+            'type': _typeValue,
             'brand': brand,
           },
           // null clears a limit, which is what an emptied box means.
@@ -397,7 +421,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
         'devices/$deviceId/info': {
           'name': name,
           'room': room,
-          'type': _selectedType!.label,
+          'type': _typeValue,
           'brand': brand,
         },
         'devices/$deviceId/limits/maxWatts': maxWatts,
@@ -806,15 +830,35 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                         }).toList(),
                       ),
 
+                      // "Other": the user names the appliance type.
+                      if (_isOtherType(_selectedType)) ...[
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _customTypeController,
+                          textCapitalization: TextCapitalization.words,
+                          maxLength: 30,
+                          decoration: _fieldDecoration("What is this appliance? (e.g. Rice Cooker)")
+                              .copyWith(counterText: ""),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return "Enter what type of appliance this is";
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+
                       const SizedBox(height: 26),
 
                       // =================================================
-                      // BRAND (only brands that make the selected type)
+                      // BRAND (only brands that make the selected type;
+                      // typed in for "Other", which has no brand list)
                       // =================================================
                       _fieldLabel("Brand"),
 
                       const SizedBox(height: 8),
 
+                      if (!_isOtherType(_selectedType))
                       DropdownButtonFormField<String>(
                         // Rebuilt when the type changes so the cleared
                         // brand actually shows as cleared.
@@ -851,7 +895,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                       ),
 
                       if (_selectedBrand == kOtherOption) ...[
-                        const SizedBox(height: 10),
+                        if (!_isOtherType(_selectedType)) const SizedBox(height: 10),
                         TextFormField(
                           controller: _customBrandController,
                           textCapitalization: TextCapitalization.words,

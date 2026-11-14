@@ -35,7 +35,7 @@ class AppNavBar extends StatelessWidget {
           _item(context, AppTab.home, Icons.home, "Home", '/home'),
           _item(context, AppTab.appliances, Icons.power, "Appliances", '/appliances'),
           if (showReports) _item(context, AppTab.report, Icons.show_chart, "Report", '/report'),
-          _item(context, AppTab.schedule, Icons.access_time_filled, "Schedule", '/schedule'),
+          _item(context, AppTab.schedule, Icons.access_time_filled, "Control", '/schedule'),
         ],
       ),
     );

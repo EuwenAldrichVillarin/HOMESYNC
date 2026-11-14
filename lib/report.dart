@@ -65,6 +65,12 @@ class _ReportPageState extends State<ReportPage> {
   double _pesoPerKwh = _kDefaultPesoPerKwh;
   bool _exporting = false;
 
+  // Tap-to-toggle between % and pesos: the "vs Last" card, and each
+  // appliance in the breakdown (by device id, so a toggled row stays
+  // toggled when live data refreshes it).
+  bool _vsLastInPeso = false;
+  final Set<String> _breakdownInPeso = {};
+
   HouseholdSession? _session;
   StreamSubscription<DatabaseEvent>? _appliancesSub;
   StreamSubscription<DatabaseEvent>? _rateSub;
@@ -366,6 +372,13 @@ class _ReportPageState extends State<ReportPage> {
     return (raw / step).ceil() * step;
   }
 
+  // "₱1,234.56" — two decimals so small amounts (a single hour, a light
+  // bulb) don't round to ₱0.
+  static String _formatPeso(double value) {
+    final cents = (value.abs() * 100).round();
+    return "₱${_formatThousands(cents ~/ 100)}.${(cents % 100).toString().padLeft(2, '0')}";
+  }
+
   static String _formatThousands(num value) {
     final rounded = value.round();
     final digits = rounded.abs().toString();
@@ -528,6 +541,7 @@ class _ReportPageState extends State<ReportPage> {
     final previousTotal = _totalForRange(previousStart, periodStart);
     final double? changePct = previousTotal > 0 ? ((totalKwh - previousTotal) / previousTotal) * 100 : null;
 
+    final deviceIds = {for (final entry in _devices.entries) entry.value: entry.key};
     final breakdown = _devices.values
         .map((device) => MapEntry(device, _kwhForDevice(device, periodStart, periodEnd)))
         .toList()
@@ -656,13 +670,13 @@ class _ReportPageState extends State<ReportPage> {
                       height: 34,
                       child: Row(
                         children: [
-                          _filterTab("Hour", _ReportRange.hour),
+                          _filterTab("Day", _ReportRange.hour),
                           const SizedBox(width: 6),
-                          _filterTab("Day", _ReportRange.day),
+                          _filterTab("Week", _ReportRange.day),
                           const SizedBox(width: 6),
-                          _filterTab("Week", _ReportRange.week),
+                          _filterTab("Month", _ReportRange.week),
                           const SizedBox(width: 6),
-                          _filterTab("Month", _ReportRange.month),
+                          _filterTab("Year", _ReportRange.month),
                           const SizedBox(width: 6),
                           _filterTab("Date Range", _ReportRange.custom, onCustomTap: _pickCustomRange),
                         ],
@@ -691,129 +705,20 @@ class _ReportPageState extends State<ReportPage> {
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: const Color(0xFFE5E7EB)),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-
-                          // TITLE + LEGEND
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      "Energy Usage (kWh)",
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF1F2937),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      _chartSubtitle,
-                                      style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8)),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              _legendItem(const Color(0xFFF59E0B), _currentLegend),
-                              const SizedBox(width: 8),
-                              _legendItem(const Color(0xFF0F766E), "Earlier"),
-                            ],
-                          ),
-
-                          const SizedBox(height: 10),
-
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-
-                              // Y-AXIS TITLE
-                              SizedBox(
-                                height: _valueLabelHeight(dense) + _kBarAreaHeight,
-                                child: const RotatedBox(
-                                  quarterTurns: 3,
-                                  child: Center(
-                                    child: Text(
-                                      "kWh",
-                                      style: TextStyle(
-                                        fontSize: 8,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF64748B),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                              const SizedBox(width: 3),
-
-                              // Y-AXIS LABELS — spans exactly the bar area so
-                              // the top label lines up with a full-height bar.
-                              Padding(
-                                padding: EdgeInsets.only(top: _valueLabelHeight(dense) - 4),
-                                child: SizedBox(
-                                  width: 24,
-                                  height: _kBarAreaHeight + 8,
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: List.generate(6, (i) {
-                                      final v = axisMax * (5 - i) / 5;
-                                      return Text(
-                                        v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1),
-                                        style: const TextStyle(fontSize: 7, color: Color(0xFF94A3B8)),
-                                      );
-                                    }),
-                                  ),
-                                ),
-                              ),
-
-                              const SizedBox(width: 5),
-
-                              // BARS
-                              Expanded(
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: List.generate(buckets.length, (i) {
-                                    final bucket = buckets[i];
-                                    // The bar for the current hour/day/week/month.
-                                    final isToday = !now.isBefore(bucket.start) &&
-                                        now.isBefore(bucket.end);
-                                    return _reportBar(
-                                      label: bucket.label,
-                                      tooltip: "${bucket.detail}: ${_kwhLabel(bucketTotals[i])} kWh",
-                                      value: bucketTotals[i],
-                                      axisMax: axisMax,
-                                      highlighted: isToday,
-                                      dense: dense,
-                                      // Many bars need to be thinner to leave
-                                      // a gap between them.
-                                      barWidth: dense ? 7 : 14,
-                                    );
-                                  }),
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 4),
-
-                          // X-AXIS TITLE
-                          Center(
-                            child: Text(
-                              _xAxisTitle,
-                              style: const TextStyle(
-                                fontSize: 8,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF64748B),
-                              ),
-                            ),
-                          ),
-                        ],
+                      child: _chartContent(
+                        buckets: buckets,
+                        bucketTotals: bucketTotals,
+                        axisMax: axisMax,
+                        now: now,
+                        dense: dense,
+                        zoomed: false,
+                        onZoomTap: () => _openZoomedChart(
+                          buckets: buckets,
+                          bucketTotals: bucketTotals,
+                          axisMax: axisMax,
+                          now: now,
+                          dense: dense,
+                        ),
                       ),
                     ),
 
@@ -840,36 +745,45 @@ class _ReportPageState extends State<ReportPage> {
                           ),
                         ),
                         const SizedBox(width: 8),
+                        // Tap to switch between the % change and the
+                        // same change in pesos.
                         Expanded(
-                          child: Container(
-                            height: 60,
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
+                          child: Material(
+                            color: Colors.white,
+                            shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFFE5E7EB)),
+                              side: const BorderSide(color: Color(0xFFE5E7EB)),
                             ),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Text(
-                                  "vs Last",
-                                  style: TextStyle(fontSize: 7, color: Color(0xFF6B7280)),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: () => setState(() => _vsLastInPeso = !_vsLastInPeso),
+                              child: Container(
+                                height: 60,
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      _vsLastInPeso ? "vs Last (₱)" : "vs Last",
+                                      style: const TextStyle(fontSize: 7, color: Color(0xFF6B7280)),
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      changePct == null
+                                          ? "—"
+                                          : "${changePct <= 0 ? '↓' : '↑'} "
+                                              "${_vsLastInPeso ? _formatPeso((totalKwh - previousTotal) * _pesoPerKwh) : "${changePct.abs().toStringAsFixed(0)}%"}",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: changePct == null
+                                            ? const Color(0xFF94A3B8)
+                                            : (changePct <= 0 ? const Color(0xFF34D399) : const Color(0xFFEF4444)),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 5),
-                                Text(
-                                  changePct == null
-                                      ? "—"
-                                      : "${changePct <= 0 ? '↓' : '↑'} ${changePct.abs().toStringAsFixed(0)}%",
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: changePct == null
-                                        ? const Color(0xFF94A3B8)
-                                        : (changePct <= 0 ? const Color(0xFF34D399) : const Color(0xFFEF4444)),
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
                         ),
@@ -928,17 +842,27 @@ class _ReportPageState extends State<ReportPage> {
                     else
                       for (int i = 0; i < breakdown.length; i++) ...[
                         if (i > 0) const SizedBox(height: 8),
-                        _usageItem(
-                          icon: _typeIcons[breakdown[i].key.type] ?? Icons.power,
-                          iconBackground: const Color(0xFFE8F8F5),
-                          iconColor: const Color(0xFF0F766E),
-                          title: breakdown[i].key.room.isNotEmpty
-                              ? "${breakdown[i].key.name} (${breakdown[i].key.room})"
-                              : breakdown[i].key.name,
-                          percentage: totalKwh > 0
-                              ? "${(breakdown[i].value / totalKwh * 100).toStringAsFixed(0)}%"
-                              : "0%",
-                        ),
+                        Builder(builder: (context) {
+                          final id = deviceIds[breakdown[i].key] ?? breakdown[i].key.name;
+                          final inPeso = _breakdownInPeso.contains(id);
+                          return _usageItem(
+                            icon: _typeIcons[breakdown[i].key.type] ?? Icons.power,
+                            iconBackground: const Color(0xFFE8F8F5),
+                            iconColor: const Color(0xFF0F766E),
+                            title: breakdown[i].key.room.isNotEmpty
+                                ? "${breakdown[i].key.name} (${breakdown[i].key.room})"
+                                : breakdown[i].key.name,
+                            // Tap to switch between share of total and cost.
+                            percentage: inPeso
+                                ? _formatPeso(breakdown[i].value * _pesoPerKwh)
+                                : totalKwh > 0
+                                    ? "${(breakdown[i].value / totalKwh * 100).toStringAsFixed(0)}%"
+                                    : "0%",
+                            onTap: () => setState(() {
+                              if (!_breakdownInPeso.remove(id)) _breakdownInPeso.add(id);
+                            }),
+                          );
+                        }),
                       ],
                   ],
                 ),
@@ -984,13 +908,242 @@ class _ReportPageState extends State<ReportPage> {
   }
 
   // ===============================================================
+  // CHART — shared by the card on the page and the zoomed modal, so
+  // both always draw the same thing. Zoomed: taller, wider bars that
+  // scroll sideways under a fixed y-axis.
+  // ===============================================================
+  Widget _chartContent({
+    required List<_Bucket> buckets,
+    required List<double> bucketTotals,
+    required double axisMax,
+    required DateTime now,
+    required bool dense,
+    required bool zoomed,
+    required VoidCallback onZoomTap,
+    ScrollController? scroll,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+
+        // TITLE + LEGEND
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Energy Usage (kWh)",
+                    style: TextStyle(
+                      fontSize: zoomed ? 15 : 12,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _chartSubtitle,
+                    style: TextStyle(fontSize: zoomed ? 11 : 9, color: const Color(0xFF94A3B8)),
+                  ),
+                ],
+              ),
+            ),
+            _legendItem(const Color(0xFFF59E0B), _currentLegend),
+            const SizedBox(width: 8),
+            _legendItem(const Color(0xFF0F766E), "Earlier"),
+            const SizedBox(width: 6),
+            Tooltip(
+              message: zoomed ? "Zoom out" : "Zoom in",
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: onZoomTap,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: zoomed ? const Color(0xFFE8F8F5) : Colors.white,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: Icon(
+                    zoomed ? Icons.zoom_out : Icons.zoom_in,
+                    size: 17,
+                    color: const Color(0xFF0F766E),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 10),
+
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+
+            // Y-AXIS TITLE
+            SizedBox(
+              height: _valueLabelHeight(dense) + _barAreaHeight(zoomed),
+              child: const RotatedBox(
+                quarterTurns: 3,
+                child: Center(
+                  child: Text(
+                    "kWh",
+                    style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 3),
+
+            // Y-AXIS LABELS — spans exactly the bar area so
+            // the top label lines up with a full-height bar.
+            Padding(
+              padding: EdgeInsets.only(top: _valueLabelHeight(dense) - 4),
+              child: SizedBox(
+                width: 24,
+                height: _barAreaHeight(zoomed) + 8,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: List.generate(6, (i) {
+                    final v = axisMax * (5 - i) / 5;
+                    return Text(
+                      v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1),
+                      style: TextStyle(
+                        fontSize: zoomed ? 9 : 7,
+                        color: const Color(0xFF94A3B8),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 5),
+
+            // BARS — zoomed, each bar gets a fixed-width
+            // slot and the row scrolls sideways.
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final slotWidth = _zoomSlotWidth(constraints.maxWidth, buckets.length);
+                  final bars = Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: List.generate(buckets.length, (i) {
+                      final bucket = buckets[i];
+                      // The bar for the current hour/day/week/month.
+                      final isToday = !now.isBefore(bucket.start) &&
+                          now.isBefore(bucket.end);
+                      return _reportBar(
+                        label: bucket.label,
+                        tooltip: "${bucket.detail}: ${_kwhLabel(bucketTotals[i])} kWh",
+                        value: bucketTotals[i],
+                        axisMax: axisMax,
+                        highlighted: isToday,
+                        dense: dense,
+                        zoomed: zoomed,
+                        slotWidth: zoomed ? slotWidth : null,
+                        // Many bars need to be thinner to leave
+                        // a gap between them.
+                        barWidth: zoomed ? 22 : (dense ? 7 : 14),
+                      );
+                    }),
+                  );
+                  // Only scroll (and show a scrollbar) when the bars
+                  // don't all fit.
+                  final fits = slotWidth * buckets.length <= constraints.maxWidth + 0.5;
+                  if (!zoomed || fits) return bars;
+                  return Scrollbar(
+                    controller: scroll,
+                    thumbVisibility: true,
+                    child: SingleChildScrollView(
+                      controller: scroll,
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: bars,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 4),
+
+        // X-AXIS TITLE
+        Center(
+          child: Text(
+            _xAxisTitle,
+            style: TextStyle(
+              fontSize: zoomed ? 10 : 8,
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF64748B),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Opens the zoomed chart in a centred modal. It shows the numbers as
+  // they were when it opened; tapping zoom-out (or outside) closes it.
+  void _openZoomedChart({
+    required List<_Bucket> buckets,
+    required List<double> bucketTotals,
+    required double axisMax,
+    required DateTime now,
+    required bool dense,
+  }) {
+    final current = buckets.indexWhere((b) => !now.isBefore(b.start) && now.isBefore(b.end));
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (dialogContext) => _ZoomedChartDialog(
+        barCount: buckets.length,
+        currentIndex: current,
+        builder: (scroll) => _chartContent(
+          buckets: buckets,
+          bucketTotals: bucketTotals,
+          axisMax: axisMax,
+          now: now,
+          dense: dense,
+          zoomed: true,
+          scroll: scroll,
+          onZoomTap: () => Navigator.of(dialogContext).pop(),
+        ),
+      ),
+    );
+  }
+
+  // ===============================================================
   // REPORT BAR
   // ===============================================================
   static const double _kBarAreaHeight = 128;
+  static const double _kZoomedBarAreaHeight = 220;
+
+  static double _barAreaHeight(bool zoomed) => zoomed ? _kZoomedBarAreaHeight : _kBarAreaHeight;
 
   // Room above the bar for its value; taller when the value is turned
   // sideways on dense charts.
   static double _valueLabelHeight(bool dense) => dense ? 24 : 12;
+
+  // Zoomed, every bar gets at least 40px so labels sit upright and the
+  // row scrolls; a short chart still stretches to fill the card.
+  static double _zoomSlotWidth(double available, int count) {
+    const minSlot = 40.0;
+    return count == 0 ? minSlot : (available / count).clamp(minSlot, double.infinity).toDouble();
+  }
 
   static Widget _reportBar({
     required String label,
@@ -999,21 +1152,24 @@ class _ReportPageState extends State<ReportPage> {
     required double axisMax,
     required bool highlighted,
     required bool dense,
+    bool zoomed = false,
+    double? slotWidth,
     double barWidth = 14,
   }) {
-    final height =
-        axisMax <= 0 ? 2.0 : (value / axisMax * _kBarAreaHeight).clamp(2.0, _kBarAreaHeight).toDouble();
+    // Zoomed bars have room for upright labels whatever the range.
+    final sidewaysLabels = dense && !zoomed;
+    final areaHeight = _barAreaHeight(zoomed);
+    final height = axisMax <= 0 ? 2.0 : (value / axisMax * areaHeight).clamp(2.0, areaHeight).toDouble();
     final color = highlighted ? const Color(0xFFF59E0B) : const Color(0xFF0F766E);
 
-    Widget sideways(Widget child) => dense ? RotatedBox(quarterTurns: 3, child: child) : child;
+    Widget sideways(Widget child) => sidewaysLabels ? RotatedBox(quarterTurns: 3, child: child) : child;
 
-    return Expanded(
-      child: Tooltip(
+    final bar = Tooltip(
         message: tooltip,
         child: Column(
           children: [
             SizedBox(
-              height: _valueLabelHeight(dense) + _kBarAreaHeight,
+              height: _valueLabelHeight(dense) + areaHeight,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -1023,7 +1179,7 @@ class _ReportPageState extends State<ReportPage> {
                         _kwhLabel(value),
                         maxLines: 1,
                         softWrap: false,
-                        style: TextStyle(fontSize: 6, fontWeight: FontWeight.w600, color: color),
+                        style: TextStyle(fontSize: zoomed ? 9 : 6, fontWeight: FontWeight.w600, color: color),
                       ),
                     ),
                   const SizedBox(height: 2),
@@ -1035,14 +1191,14 @@ class _ReportPageState extends State<ReportPage> {
             Container(height: 1, color: const Color(0xFFE5E7EB)),
             const SizedBox(height: 4),
             SizedBox(
-              height: dense ? 22 : 10,
+              height: sidewaysLabels ? 22 : (zoomed ? 13 : 10),
               child: sideways(
                 Text(
                   label,
                   maxLines: 1,
                   softWrap: false,
                   style: TextStyle(
-                    fontSize: 7,
+                    fontSize: zoomed ? 10 : 7,
                     fontWeight: highlighted ? FontWeight.bold : FontWeight.normal,
                     color: highlighted ? const Color(0xFFF59E0B) : const Color(0xFF64748B),
                   ),
@@ -1051,8 +1207,9 @@ class _ReportPageState extends State<ReportPage> {
             ),
           ],
         ),
-      ),
-    );
+      );
+
+    return slotWidth != null ? SizedBox(width: slotWidth, child: bar) : Expanded(child: bar);
   }
 
   static Widget _legendItem(Color color, String label) {
@@ -1108,38 +1265,98 @@ class _ReportPageState extends State<ReportPage> {
     required Color iconColor,
     required String title,
     required String percentage,
+    VoidCallback? onTap,
   }) {
-    return Container(
-      width: double.infinity,
-      height: 54,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        side: const BorderSide(color: Color(0xFFE5E7EB)),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(color: iconBackground, borderRadius: BorderRadius.circular(9)),
-            child: Icon(icon, size: 17, color: iconColor),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          width: double.infinity,
+          height: 54,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(color: iconBackground, borderRadius: BorderRadius.circular(9)),
+                child: Icon(icon, size: 17, color: iconColor),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                ),
+              ),
+              Text(
+                percentage,
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
-            ),
-          ),
-          Text(
-            percentage,
-            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
-          ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+// Centred modal holding the zoomed chart. Owns the horizontal scroll
+// controller so it can open scrolled to the current bar, which is often
+// off-screen once the bars are wider.
+class _ZoomedChartDialog extends StatefulWidget {
+  final int barCount;
+  final int currentIndex; // -1 when no bar is "now"
+  final Widget Function(ScrollController scroll) builder;
+
+  const _ZoomedChartDialog({required this.barCount, required this.currentIndex, required this.builder});
+
+  @override
+  State<_ZoomedChartDialog> createState() => _ZoomedChartDialogState();
+}
+
+class _ZoomedChartDialogState extends State<_ZoomedChartDialog> {
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients || widget.currentIndex < 0) return;
+      final position = _scroll.position;
+      final slot = (position.maxScrollExtent + position.viewportDimension) / widget.barCount;
+      final target = widget.currentIndex * slot - (position.viewportDimension - slot) / 2;
+      _scroll.jumpTo(target.clamp(0.0, position.maxScrollExtent).toDouble());
+    });
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.white,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 16, 14, 12),
+          child: widget.builder(_scroll),
+        ),
       ),
     );
   }

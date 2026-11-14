@@ -557,13 +557,13 @@ class _SchedulePageState extends State<SchedulePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "Schedules",
+                      "Timer Control",
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _kInk),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       _canEdit
-                          ? "Create a schedule, choose which appliances it switches, and it runs itself."
+                          ? "Create a schedule as to when an appliance turns on or off automatically"
                           : "These are the household's schedules. Your admin hasn't given you permission to change them.",
                       style: const TextStyle(fontSize: 11, color: _kMuted),
                     ),
