@@ -7,6 +7,7 @@ import 'household.dart';
 import 'activity.dart';
 import 'members.dart';
 import 'app_nav_bar.dart';
+import 'ir_remote.dart';
 
 class AppliancesPage extends StatefulWidget {
   const AppliancesPage({super.key});
@@ -806,6 +807,8 @@ class _ApplianceCardState extends State<_ApplianceCard> {
     final title = (info['name'] as String?) ?? "Unnamed";
     final room = (info['room'] as String?) ?? "";
     final type = (info['type'] as String?) ?? "Other";
+    final remote = data['remote'];
+    final hasRemote = remote is Map && remote['buttons'] is Map && (remote['buttons'] as Map).isNotEmpty;
 
     final isOn = state['relay'] == true;
     final pending = _pendingTarget != null;
@@ -880,6 +883,18 @@ class _ApplianceCardState extends State<_ApplianceCard> {
                       color: displayedIsOn ? const Color(0xFF9CA3AF) : const Color(0xFFD1D5DB),
                     ),
                   ),
+                  // Quick access to the recorded RF remote buttons.
+                  if (hasRemote) ...[
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: () => showRemoteControlSheet(context, deviceId: widget.deviceId, applianceName: title),
+                      child: const Icon(
+                        Icons.settings_remote,
+                        size: 15,
+                        color: Color(0xFF0F766E),
+                      ),
+                    ),
+                  ],
                   // Renaming writes devices/{id}/info, which the rules
                   // keep to the owner.
                   if (widget.canManage) ...[

@@ -74,6 +74,57 @@
           "$date": {
             "$hour": { ".validate": "newData.isNumber()" }
           }
+        },
+
+        "remote": {
+          ".write": "auth != null && root.child('devices').child($deviceId).child('ownerId').val() == auth.uid",
+          "buttons": {
+            "$buttonId": {
+              ".validate": "newData.hasChildren(['name', 'pulses'])",
+              "name":      { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 30" },
+              "khz":       { ".validate": "newData.isNumber() && newData.val() >= 30 && newData.val() <= 60" },
+              "pulses":    { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 8000" },
+              "createdAt": { ".validate": "newData.isNumber()" },
+              "$other":    { ".validate": false }
+            }
+          },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+
+    "hubs": {
+      ".read": "auth != null",
+
+      "$hubId": {
+        "ownerId": {
+          ".write": "auth != null && (!data.exists() || data.val() == auth.uid)",
+          ".validate": "newData.isString()"
+        },
+
+        "command": {
+          ".write": "auth != null && newData.exists() && (root.child('hubs').child($hubId).child('ownerId').val() == auth.uid || (newData.child('action').val() == 'send' && root.child('hubs').child($hubId).child('ownerId').isString() && root.child('users').child(root.child('hubs').child($hubId).child('ownerId').val()).child('members').child(auth.uid).child('permissions').child('control').val() == true))",
+          ".validate": "newData.hasChildren(['id', 'action', 'khz', 'at'])",
+          "id":     { ".validate": "newData.isString() && newData.val().length <= 40" },
+          "action": { ".validate": "newData.val() == 'record' || newData.val() == 'send'" },
+          "khz":    { ".validate": "newData.isNumber() && newData.val() >= 30 && newData.val() <= 60" },
+          "pulses": { ".validate": "newData.isString() && newData.val().length <= 8000" },
+          "repeat": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 5" },
+          "at":     { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        },
+
+        "result": {
+          ".write": "auth != null && auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3'"
+        },
+
+        "status": {
+          ".write": "auth != null && auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3'"
+        },
+
+        "wifiReset": {
+          ".write": "auth != null && (root.child('hubs').child($hubId).child('ownerId').val() == auth.uid || auth.uid == '9EpGk0zEruOmZ6PmaXyY5MNVMaB3')",
+          ".validate": "newData.isBoolean()"
         }
       }
     },

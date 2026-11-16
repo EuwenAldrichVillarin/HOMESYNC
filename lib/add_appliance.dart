@@ -5,6 +5,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'alerts.dart';
 import 'household.dart';
 import 'activity.dart';
+import 'ir_remote.dart';
 
 // ===================================================================
 // APPLIANCE TYPE OPTIONS
@@ -483,6 +484,7 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
         'devices/$deviceId/schedule': null,
         'devices/$deviceId/limits': null,
         'devices/$deviceId/wifiReset': null,
+        'devices/$deviceId/remote': null,
         'users/${user.uid}/appliances/$deviceId': null,
       });
 
@@ -1053,6 +1055,43 @@ class _AddAppliancePageState extends State<AddAppliancePage> {
                               ),
                             ),
                           ],
+                        ),
+                      ],
+
+                      // =================================================
+                      // REMOTE CONTROL (editing only — the device ID has
+                      // to be claimed before buttons can hang off it)
+                      // =================================================
+                      if (_isEditing) ...[
+                        const SizedBox(height: 26),
+                        Row(
+                          children: [
+                            const Icon(Icons.settings_remote, size: 18, color: Color(0xFF0F766E)),
+                            const SizedBox(width: 6),
+                            _fieldLabel("Remote Control"),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          "Copy this appliance's infrared remote using the HomeSync IR hub. "
+                          "The hub needs a clear view of the appliance. Changes here are saved right away.",
+                          style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: RemoteControlPanel(
+                            deviceId: widget.editDeviceId!,
+                            applianceName: _nameController.text.trim().isEmpty
+                                ? "this appliance"
+                                : _nameController.text.trim(),
+                          ),
                         ),
                       ],
 

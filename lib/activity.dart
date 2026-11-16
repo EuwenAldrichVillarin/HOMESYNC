@@ -48,6 +48,7 @@ class ActivityAction {
   static const memberAdded = 'member_added';
   static const memberRemoved = 'member_removed';
   static const memberPermissions = 'member_permissions';
+  static const remotePressed = 'remote_pressed'; // detail = the button name
 }
 
 /// Records one action against the household's log.
@@ -144,6 +145,7 @@ class ActivityEntry {
         ActivityAction.memberAdded => "added the member",
         ActivityAction.memberRemoved => "removed the member",
         ActivityAction.memberPermissions => "changed access for",
+        ActivityAction.remotePressed => "used the remote for",
         _ => "acted on",
       };
 
@@ -162,11 +164,12 @@ class ActivityEntry {
         ActivityAction.memberAdded => Icons.person_add_alt,
         ActivityAction.memberRemoved => Icons.person_remove_alt_1,
         ActivityAction.memberPermissions => Icons.tune,
+        ActivityAction.remotePressed => Icons.settings_remote,
         _ => Icons.info_outline,
       };
 
   Color get tint => switch (action) {
-        ActivityAction.deviceOn || ActivityAction.roomOn => const Color(0xFF0F766E),
+        ActivityAction.deviceOn || ActivityAction.roomOn || ActivityAction.remotePressed => const Color(0xFF0F766E),
         ActivityAction.deviceOff || ActivityAction.roomOff => const Color(0xFF64748B),
         ActivityAction.applianceRemoved ||
         ActivityAction.scheduleDeleted ||
