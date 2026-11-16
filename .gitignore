@@ -49,3 +49,6 @@ sample-data-cleanup/
 
 # Locally rendered UI screenshots
 screenshots/
+
+# Arduino compile output
+firmware/**/build/
